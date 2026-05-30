@@ -571,10 +571,6 @@ function render() {
   renderThreads();
   renderReader();
   $("#inboxCount").textContent = String(threads.length);
-  $("#dashboardSummary").textContent = threads.length
-    ? `${threads.length} active conversation${threads.length === 1 ? "" : "s"}`
-    : "No inbox activity yet";
-  $("#readHealth").textContent = threads.length ? "100%" : "--";
   renderSidebarData();
   renderSettings();
   if (window.lucide) window.lucide.createIcons();

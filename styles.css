@@ -120,8 +120,7 @@ h2 {
 
 .brand p,
 .panel-header p,
-.thread-title-block p,
-.inbox-zero-band p {
+.thread-title-block p {
   color: var(--muted);
   font-size: 13px;
 }
@@ -287,39 +286,6 @@ h2 {
 .topic-tools,
 .status-line {
   gap: 8px;
-}
-
-.inbox-zero-band {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 18px;
-  margin-bottom: 18px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
-}
-
-.score-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(82px, 1fr));
-  gap: 8px;
-}
-
-.score-grid div {
-  display: grid;
-  gap: 2px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-strong);
-}
-
-.score-grid span {
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .content-grid {
@@ -1209,14 +1175,12 @@ svg {
   }
 
   .topbar,
-  .inbox-zero-band,
   .thread-toolbar,
   .ai-summary {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .score-grid,
   .content-grid,
   .workflow-grid {
     grid-template-columns: 1fr;
