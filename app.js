@@ -13,7 +13,7 @@ let pendingGameType = "";
 let settings = loadSettings();
 let tutorialIndex = 0;
 let showAllThreads = false;
-let appUnlocked = false;
+let appUnlocked = localStorage.getItem("threadlineRemembered") === "1";
 let pendingResetCode = "";
 
 const $ = (selector) => document.querySelector(selector);
@@ -467,6 +467,7 @@ $("#profileForm").addEventListener("submit", async (event) => {
     }
     settings.passcodeHash = passcodeHash;
     appUnlocked = true;
+    localStorage.removeItem("threadlineRemembered");
   }
   settings.recoveryEmail = recoveryEmail;
   saveSettings();
@@ -603,6 +604,8 @@ $("#unlockForm").addEventListener("submit", (event) => {
     return;
   }
   appUnlocked = true;
+  if ($("#rememberMe").checked) localStorage.setItem("threadlineRemembered", "1");
+  else localStorage.removeItem("threadlineRemembered");
   $("#unlockCode").value = "";
   saveSettings();
   toast("Threadline unlocked.");
@@ -632,6 +635,7 @@ $("#resetPasscodeButton").addEventListener("click", () => {
   settings.passcodeHash = "";
   pendingResetCode = "";
   appUnlocked = true;
+  localStorage.removeItem("threadlineRemembered");
   saveSettings();
   $("#unlockCode").value = "";
   $("#lockRecovery").hidden = true;
@@ -639,7 +643,7 @@ $("#resetPasscodeButton").addEventListener("click", () => {
   fetchMessages();
 });
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden || !settings.passcodeHash) return;
+  if (!document.hidden || !settings.passcodeHash || localStorage.getItem("threadlineRemembered") === "1") return;
   appUnlocked = false;
   renderSettings();
 });

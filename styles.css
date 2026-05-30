@@ -824,6 +824,14 @@ input[type="date"],
   padding-top: 4px;
 }
 
+.remember-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .tutorial-layer {
   position: fixed;
   inset: 0;
