@@ -217,6 +217,10 @@ function openSettingsDialog(dialog) {
   dialog.querySelector("input")?.focus();
 }
 
+document.querySelectorAll("[data-close-dialog]").forEach((button) => {
+  button.addEventListener("click", () => button.closest("dialog").close());
+});
+
 $("#profileButton").addEventListener("click", () => {
   $("#profileName").value = settings.profile?.name || "";
   $("#profileEmail").value = settings.profile?.email || "";

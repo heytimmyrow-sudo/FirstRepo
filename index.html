@@ -214,13 +214,13 @@
       <form method="dialog" id="composeForm">
         <div class="compose-dialog-header">
           <h2>New message</h2>
-          <button class="icon-button" value="cancel" title="Close compose"><i data-lucide="x"></i></button>
+          <button class="icon-button" type="button" data-close-dialog title="Close compose"><i data-lucide="x"></i></button>
         </div>
         <label>To<input id="composeTo" type="email" required placeholder="name@example.com" /></label>
         <label>Subject<input id="composeSubject" required placeholder="Subject" /></label>
         <label>Message<textarea id="composeMessage" required placeholder="Write your message"></textarea></label>
         <div class="compose-dialog-actions">
-          <button class="ghost-button" value="cancel">Cancel</button>
+          <button class="ghost-button" type="button" data-close-dialog>Cancel</button>
           <button class="primary-action small" id="sendMessageButton" value="default"><i data-lucide="send-horizontal"></i> Send</button>
         </div>
       </form>
@@ -230,13 +230,13 @@
       <form method="dialog" id="profileForm">
         <div class="compose-dialog-header">
           <h2>Profile setup</h2>
-          <button class="icon-button" value="cancel" title="Close profile"><i data-lucide="x"></i></button>
+          <button class="icon-button" type="button" data-close-dialog title="Close profile"><i data-lucide="x"></i></button>
         </div>
         <label>Name<input id="profileName" required placeholder="Your name" /></label>
         <label>Email<input id="profileEmail" type="email" required placeholder="you@example.com" /></label>
         <label>Workspace<input id="profileWorkspace" placeholder="Workspace name" /></label>
         <div class="compose-dialog-actions">
-          <button class="ghost-button" value="cancel">Cancel</button>
+          <button class="ghost-button" type="button" data-close-dialog>Cancel</button>
           <button class="primary-action small" value="default"><i data-lucide="save"></i> Save</button>
         </div>
       </form>
@@ -246,13 +246,13 @@
       <form method="dialog" id="notificationForm">
         <div class="compose-dialog-header">
           <h2>Notification rules</h2>
-          <button class="icon-button" value="cancel" title="Close notifications"><i data-lucide="x"></i></button>
+          <button class="icon-button" type="button" data-close-dialog title="Close notifications"><i data-lucide="x"></i></button>
         </div>
         <label class="dialog-check"><input id="notifyReplies" type="checkbox" /> New replies</label>
         <label class="dialog-check"><input id="notifyMentions" type="checkbox" /> Mentions and assignments</label>
         <label class="dialog-check"><input id="notifyFollowups" type="checkbox" /> Follow-up reminders</label>
         <div class="compose-dialog-actions">
-          <button class="ghost-button" value="cancel">Cancel</button>
+          <button class="ghost-button" type="button" data-close-dialog>Cancel</button>
           <button class="primary-action small" value="default"><i data-lucide="save"></i> Save</button>
         </div>
       </form>
@@ -262,13 +262,13 @@
       <form method="dialog" id="inboxForm">
         <div class="compose-dialog-header">
           <h2>Connect inbox</h2>
-          <button class="icon-button" value="cancel" title="Close inbox setup"><i data-lucide="x"></i></button>
+          <button class="icon-button" type="button" data-close-dialog title="Close inbox setup"><i data-lucide="x"></i></button>
         </div>
         <label>Email address<input id="inboxEmail" type="email" required placeholder="inbox@example.com" /></label>
         <label>Provider<select id="inboxProvider"><option>Gmail</option><option>Outlook</option><option>Other</option></select></label>
         <p class="dialog-help">This demo stores the connection label locally. Live email sync needs a backend and provider authorization.</p>
         <div class="compose-dialog-actions">
-          <button class="ghost-button" value="cancel">Cancel</button>
+          <button class="ghost-button" type="button" data-close-dialog>Cancel</button>
           <button class="primary-action small" value="default"><i data-lucide="plug-zap"></i> Connect</button>
         </div>
       </form>
