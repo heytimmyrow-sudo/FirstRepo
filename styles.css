@@ -955,6 +955,10 @@ svg {
     display: block;
   }
 
+  .sidebar-footer {
+    display: grid;
+  }
+
   .workspace {
     padding: 12px;
   }
