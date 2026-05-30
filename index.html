@@ -52,6 +52,25 @@
           <p class="sidebar-empty">No saved searches yet</p>
         </section>
 
+        <section class="sidebar-upgrades">
+          <details class="side-tool" open>
+            <summary><span><i data-lucide="gamepad-2"></i> Game Lobby</span><b id="gameLobbyCount">0</b></summary>
+            <div id="gameLobbyList" class="side-tool-list"></div>
+          </details>
+          <details class="side-tool">
+            <summary><span><i data-lucide="contact"></i> Contacts</span><b id="contactsCount">0</b></summary>
+            <div id="contactList" class="side-tool-list"></div>
+          </details>
+          <details class="side-tool">
+            <summary><span><i data-lucide="settings-2"></i> Settings</span></summary>
+            <div class="side-tool-list">
+              <button id="sidebarNotificationsButton"><i data-lucide="bell"></i> Notifications</button>
+              <button id="installHelpButton"><i data-lucide="smartphone"></i> Install help</button>
+              <button id="sidebarProfileButton"><i data-lucide="circle-user-round"></i> Profile</button>
+            </div>
+          </details>
+        </section>
+
         <div class="sidebar-footer">
           <label class="toggle-row">
             <span>Dark mode</span>
@@ -130,6 +149,7 @@
                 </div>
                 <h2 id="threadTitle"></h2>
                 <p id="threadSubtitle"></p>
+                <p class="presence-line" id="detailPresence"></p>
               </div>
               <div class="reader-actions">
                 <button class="icon-button" title="Pin important message" id="pinButton"><i data-lucide="pin"></i></button>
@@ -167,6 +187,7 @@
             </div>
 
             <div id="messageStack" class="message-stack"></div>
+            <section class="game-board-panel" id="gameBoardPanel" hidden></section>
 
             <div class="reply-dock">
               <div class="collision-alert" id="collisionAlert" hidden><i data-lucide="triangle-alert"></i> A teammate is drafting a reply in this thread.</div>
@@ -179,9 +200,14 @@
                   <option>Concise follow-up</option>
                 </select>
                 <button class="ghost-button" id="toneButton">Warmer</button>
-                <button class="ghost-button">Firmer</button>
+                <button class="icon-button" id="photoButton" title="Send photo"><i data-lucide="image-plus"></i></button>
+                <button class="icon-button" id="fileButton" title="Send file"><i data-lucide="paperclip"></i></button>
+                <button class="icon-button" id="voiceNoteButton" title="Record voice note"><i data-lucide="mic"></i></button>
+                <button class="ghost-button" id="inlineAiButton"><i data-lucide="sparkles"></i> Ask AI</button>
                 <button class="primary-action small" id="sendReplyButton"><i data-lucide="send-horizontal"></i> Send</button>
               </div>
+              <input id="photoInput" type="file" accept="image/*" hidden />
+              <input id="fileInput" type="file" hidden />
             </div>
           </section>
 
@@ -280,10 +306,24 @@
         <label class="dialog-check"><input id="notifyReplies" type="checkbox" /> New replies</label>
         <label class="dialog-check"><input id="notifyMentions" type="checkbox" /> Mentions and assignments</label>
         <label class="dialog-check"><input id="notifyFollowups" type="checkbox" /> Follow-up reminders</label>
+        <label class="dialog-check"><input id="notifyDevice" type="checkbox" /> Phone and computer notifications</label>
         <div class="compose-dialog-actions">
           <button class="ghost-button" type="button" data-close-dialog onclick="this.closest('dialog').close()">Cancel</button>
           <button class="primary-action small" value="default"><i data-lucide="save"></i> Save</button>
         </div>
+      </form>
+    </dialog>
+
+    <dialog class="compose-dialog" id="installDialog">
+      <form method="dialog">
+        <div class="compose-dialog-header">
+          <h2>Install Threadline</h2>
+          <button class="icon-button" type="button" data-close-dialog onclick="this.closest('dialog').close()" title="Close install help"><i data-lucide="x"></i></button>
+        </div>
+        <p class="dialog-help"><strong>iPhone or iPad:</strong> open Threadline in Safari, tap Share, then choose Add to Home Screen.</p>
+        <p class="dialog-help"><strong>Android:</strong> open Threadline in Chrome, open the menu, then choose Install app or Add to Home screen.</p>
+        <p class="dialog-help"><strong>Computer:</strong> use your browser's install icon when it appears in the address bar.</p>
+        <div class="compose-dialog-actions"><button class="primary-action small" value="default">Done</button></div>
       </form>
     </dialog>
 

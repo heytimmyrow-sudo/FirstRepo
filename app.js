@@ -1,9 +1,24 @@
 const SUPABASE_URL = "https://jbljqusdpifdyewlenun.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_RYq_rDXqj_Ate8B66PcJEQ_a6yv1YUl";
 const MESSAGES_TABLE = "threadmail_messages";
+const GAMES_TABLE = "threadmail_games";
+const TYPING_TABLE = "threadmail_typing";
 const GAME_PREFIX = "THREADLINE_GAME::";
+const VOICE_NOTE_PREFIX = "THREADMAIL_VOICE_NOTE::";
+const PHOTO_PREFIX = "THREADMAIL_PHOTO::";
+const FILE_PREFIX = "THREADLINE_FILE::";
 const AI_HANDLE = "threadai";
 let threads = [];
+let gameRows = [];
+let typingRows = [];
+let searchText = "";
+let threadFilter = "All";
+let initialMessageFetch = true;
+let knownUnreadIds = new Set();
+let voiceRecorder = null;
+let voiceChunks = [];
+let typingIdleTimer = null;
+let lastTypingSentAt = 0;
 
 let activeThread = null;
 let quotesCleaned = false;
@@ -69,6 +84,15 @@ function unpackBody(body) {
   return { body: String(body || "").replace(/^THREADLINE_GAME::[a-z_]+\n?/, ""), game: match?.[1] || "" };
 }
 
+function parsePrefixedJson(body, prefix) {
+  if (!String(body || "").startsWith(prefix)) return null;
+  try {
+    return JSON.parse(String(body).slice(prefix.length).split("\n")[0]);
+  } catch {
+    return null;
+  }
+}
+
 async function createGame(sender, recipient, type) {
   const board = type === "connect_four"
     ? Array(42).fill("")
@@ -95,6 +119,7 @@ async function sendRemoteMessage(recipient, subject, body, options = {}) {
   const gameId = options.gameType ? await createGame(sender, normalizedRecipient, options.gameType) : null;
   const message = { sender_handle: sender, recipient_handle: normalizedRecipient, subject, body };
   if (gameId) message.game_id = gameId;
+  if (options.gameId) message.game_id = options.gameId;
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}`, {
     method: "POST",
     headers: getHeaders({ "Content-Type": "application/json", Prefer: "return=representation" }),
@@ -107,7 +132,7 @@ async function fetchMessages() {
   const handle = normalizeHandle(settings.profile?.handle || "");
   if (!isValidHandle(handle) || (settings.passcodeHash && !appUnlocked)) return;
   try {
-    const query = `or=(sender_handle.eq.${handle},recipient_handle.eq.${handle})&order=created_at.desc&limit=200`;
+    const query = `or=(sender_handle.eq.${handle},recipient_handle.eq.${handle})&select=id,sender_handle,recipient_handle,subject,body,created_at,read_at,game_id&order=created_at.desc&limit=200`;
     const response = await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}?${query}`, { headers: getHeaders() });
     if (!response.ok) throw new Error();
     const rows = await response.json();
@@ -123,29 +148,80 @@ async function fetchMessages() {
       const [other, title] = key.split("|");
       const latest = rows[rows.length - 1];
       const decoded = unpackBody(latest.body);
+      const game = latest.game_id ? gameRows.find((entry) => entry.id === latest.game_id) : null;
+      const unread = rows.filter((row) => row.recipient_handle === handle && !row.read_at);
       return {
         id: key,
         title,
         people: other,
         status: "Open",
-        labels: decoded.game ? `Game: ${getGameTitle(decoded.game)}` : "Live",
+        labels: game || decoded.game ? `Game: ${getGameTitle(game?.type || decoded.game)}` : "Live",
         urgency: "Normal",
         receipt: "Synced",
-        summary: decoded.game ? `${other} shared a ${getGameTitle(decoded.game)} game.` : decoded.body.slice(0, 120),
+        summary: game || decoded.game ? `${other} shared a ${getGameTitle(game?.type || decoded.game)} game.` : decoded.body.slice(0, 120),
         changed: "Synced from live messaging.",
         actions: [],
+        rows,
+        gameId: [...rows].reverse().find((row) => row.game_id)?.game_id || "",
+        unreadCount: unread.length,
         messages: rows.map((row) => {
           const unpacked = unpackBody(row.body);
           const game = unpacked.game ? `\n\nGame invite: ${getGameTitle(unpacked.game)}` : "";
-          return [row.sender_handle === handle ? "You" : row.sender_handle, new Date(row.created_at).toLocaleString(), `${unpacked.body}${game}`, unpacked.game ? "Game" : "Message"];
+          return {
+            sender: row.sender_handle === handle ? "You" : row.sender_handle,
+            time: new Date(row.created_at).toLocaleString(),
+            body: `${unpacked.body}${game}`,
+            topic: unpacked.game ? "Game" : "Message",
+            mine: row.sender_handle === handle,
+            readAt: row.read_at,
+          };
         }),
       };
     });
+    await fetchGames(handle);
+    await fetchTypingIndicators(handle);
+    notifyNewUnread(rows, handle);
     activeThread = activeThread ? threads.find((thread) => thread.id === activeThread.id) || null : threads[0] || null;
     render();
   } catch {
     toast("Could not refresh live messages.");
   }
+}
+
+async function fetchGames(handle) {
+  try {
+    const query = `or=(x_handle.eq.${encodeURIComponent(handle)},o_handle.eq.${encodeURIComponent(handle)})&select=id,type,x_handle,o_handle,board,turn_handle,status,created_at,updated_at&order=updated_at.desc&limit=100`;
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${GAMES_TABLE}?${query}`, { headers: getHeaders() });
+    const payload = await response.json().catch(() => []);
+    gameRows = response.ok && Array.isArray(payload) ? payload : [];
+  } catch {
+    gameRows = [];
+  }
+}
+
+async function fetchTypingIndicators(handle) {
+  try {
+    const since = new Date(Date.now() - 9000).toISOString();
+    const query = `recipient_handle=eq.${encodeURIComponent(handle)}&is_typing=eq.true&updated_at=gt.${encodeURIComponent(since)}&select=sender_handle,recipient_handle,subject_key,is_typing,updated_at`;
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${TYPING_TABLE}?${query}`, { headers: getHeaders() });
+    const payload = await response.json().catch(() => []);
+    typingRows = response.ok && Array.isArray(payload) ? payload : [];
+  } catch {
+    typingRows = [];
+  }
+}
+
+function notifyNewUnread(rows, handle) {
+  const incoming = rows.filter((row) => row.recipient_handle === handle && !row.read_at);
+  const fresh = incoming.filter((row) => !knownUnreadIds.has(row.id));
+  knownUnreadIds = new Set(incoming.map((row) => row.id));
+  if (initialMessageFetch) {
+    initialMessageFetch = false;
+    return;
+  }
+  if (!fresh.length || !settings.notifications?.device || !("Notification" in window) || Notification.permission !== "granted") return;
+  const row = fresh[0];
+  new Notification(`New Threadline message from ${row.sender_handle}`, { body: row.subject || row.body.slice(0, 80), icon: "threadline-icon-192.png" });
 }
 
 function toast(message) {
@@ -191,20 +267,34 @@ function renderThreads() {
     </div>`;
     return;
   }
-  const visibleThreads = showAllThreads ? threads : threads.slice(0, 4);
-  const hiddenThreadCount = threads.length - visibleThreads.length;
+  const filteredThreads = threads.filter((thread) => {
+    const matchesSearch = !searchText || `${thread.title} ${thread.summary} ${thread.people}`.toLowerCase().includes(searchText);
+    const matchesFilter = threadFilter === "All"
+      || (threadFilter === "Sender" && thread.people)
+      || (threadFilter === "Project" && thread.title.toLowerCase().includes("project"))
+      || (threadFilter === "Deadline" && /deadline|due|today|tomorrow/i.test(thread.summary))
+      || (threadFilter === "Status" && thread.status !== "Resolved");
+    return matchesSearch && matchesFilter;
+  });
+  const visibleThreads = showAllThreads ? filteredThreads : filteredThreads.slice(0, 4);
+  const hiddenThreadCount = filteredThreads.length - visibleThreads.length;
+  if (!visibleThreads.length) {
+    list.innerHTML = `<div class="thread-list-empty"><i data-lucide="search-x"></i><strong>No matching threads</strong><span>Try a different search or filter.</span></div>`;
+    return;
+  }
   list.innerHTML = visibleThreads
     .map(
       (thread) => `
         <button class="thread-card ${thread.id === activeThread?.id ? "active" : ""}" data-id="${escapeHtml(thread.id)}">
           <strong>${escapeHtml(thread.title)}</strong>
+          ${thread.unreadCount ? `<b class="unread-badge">${thread.unreadCount}</b>` : ""}
           <span>${escapeHtml(thread.summary)}</span>
           <span class="thread-meta"><span>${escapeHtml(thread.people)}</span><span>${escapeHtml(thread.urgency)}</span></span>
         </button>
       `,
     )
     .join("");
-  if (threads.length > 4) {
+  if (filteredThreads.length > 4) {
     list.insertAdjacentHTML(
       "beforeend",
       `<button class="show-more-button" id="showMoreThreadsButton">
@@ -219,6 +309,7 @@ function renderThreads() {
       quotesCleaned = false;
       topicsSplit = false;
       showAllMessages = false;
+      markThreadRead(activeThread);
       render();
     });
   });
@@ -237,10 +328,10 @@ function renderMessages() {
   const hiddenCount = activeThread.messages.length - visibleIndexes.length;
 
   const renderMessage = (index) => {
-      const [sender, time, body, topic] = activeThread.messages[index];
+      const { sender, time, body, topic, mine, readAt } = activeThread.messages[index];
       const cleanBody = quotesCleaned ? body.replace(/>.*$/, "").trim() : body;
       return `
-        <article class="message" data-index="${index}">
+        <article class="message ${mine ? "from-me" : "from-them"}" data-index="${index}">
           <div class="message-head">
             <div>
               <strong>${escapeHtml(sender)}</strong>
@@ -249,7 +340,8 @@ function renderMessages() {
             <button class="collapse-button">${index === 0 ? "Collapse" : "Expand"}</button>
           </div>
           ${topicsSplit ? `<span class="topic-tag">${escapeHtml(topic)}</span>` : ""}
-          <p class="message-body ${body.includes(">") && !quotesCleaned ? "quote" : ""}">${escapeHtml(cleanBody)}</p>
+          ${renderMessageBody(cleanBody)}
+          ${mine ? `<span class="message-receipt">${readAt ? "Read" : "Sent"}</span>` : ""}
         </article>
       `;
     };
@@ -281,10 +373,170 @@ function renderMessages() {
   });
 }
 
+function renderMessageBody(body) {
+  const photo = parsePrefixedJson(body, PHOTO_PREFIX);
+  if (photo?.url) return `<div class="message-media"><img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.name || "Sent photo")}" /><span>${escapeHtml(photo.name || "Photo")}</span></div>`;
+  const voice = parsePrefixedJson(body, VOICE_NOTE_PREFIX);
+  if (voice?.url) return `<div class="message-media"><audio controls src="${escapeHtml(voice.url)}"></audio><span>Voice note</span></div>`;
+  const file = parsePrefixedJson(body, FILE_PREFIX);
+  if (file?.url) return `<div class="message-media"><a class="ghost-button" href="${escapeHtml(file.url)}" download="${escapeHtml(file.name || "download")}"><i data-lucide="download"></i> ${escapeHtml(file.name || "Download file")}</a></div>`;
+  return `<p class="message-body ${body.includes(">") && !quotesCleaned ? "quote" : ""}">${escapeHtml(body)}</p>`;
+}
+
 function renderActions() {
   $("#actionItems").innerHTML = activeThread.actions
     .map((item, index) => `<label><input type="checkbox" ${index === 2 ? "checked" : ""} /> ${item}</label>`)
     .join("");
+}
+
+function activeTypingHandle() {
+  if (!activeThread) return "";
+  return typingRows.find((row) => row.sender_handle === activeThread.people && row.subject_key === activeThread.title.toLowerCase().slice(0, 120))?.sender_handle || "";
+}
+
+function renderSidebarData() {
+  const lobby = $("#gameLobbyList");
+  lobby.innerHTML = gameRows.length
+    ? gameRows.slice(0, 6).map((game) => {
+        const other = game.x_handle === settings.profile?.handle ? game.o_handle : game.x_handle;
+        return `<button data-game-open="${escapeHtml(game.id)}"><i data-lucide="play"></i><span>${escapeHtml(getGameTitle(game.type))}<br><small>${escapeHtml(other)} · ${escapeHtml(game.status.replaceAll("_", " "))}</small></span></button>`;
+      }).join("")
+    : `<span class="sidebar-empty">No active games yet</span>`;
+  $("#gameLobbyCount").textContent = String(gameRows.length);
+  const contacts = [...new Set(threads.map((thread) => thread.people))].filter(Boolean);
+  $("#contactList").innerHTML = contacts.length
+    ? contacts.map((contact) => `<button data-contact="${escapeHtml(contact)}"><i data-lucide="user-round"></i> ${escapeHtml(contact)}</button>`).join("")
+    : `<span class="sidebar-empty">Contacts appear after you message someone</span>`;
+  $("#contactsCount").textContent = String(contacts.length);
+  lobby.querySelectorAll("[data-game-open]").forEach((button) => button.addEventListener("click", () => {
+    const thread = threads.find((item) => item.gameId === button.dataset.gameOpen);
+    if (thread) activeThread = thread;
+    render();
+    setSidebarOpen(false);
+  }));
+  $("#contactList").querySelectorAll("[data-contact]").forEach((button) => button.addEventListener("click", () => {
+    $("#composeTo").value = button.dataset.contact;
+    openCompose();
+    setSidebarOpen(false);
+  }));
+}
+
+async function markThreadRead(thread) {
+  if (!thread?.unreadCount) return;
+  const unreadRows = thread.rows.filter((row) => row.recipient_handle === settings.profile?.handle && !row.read_at);
+  const now = new Date().toISOString();
+  unreadRows.forEach((row) => { row.read_at = now; });
+  thread.unreadCount = 0;
+  try {
+    const ids = unreadRows.map((row) => encodeURIComponent(row.id)).join(",");
+    await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}?id=in.(${ids})`, {
+      method: "PATCH",
+      headers: getHeaders({ "Content-Type": "application/json", Prefer: "return=minimal" }),
+      body: JSON.stringify({ read_at: now }),
+    });
+  } catch {
+    toast("Opened locally. Read receipt will retry later.");
+  }
+}
+
+function renderGameBoard() {
+  const panel = $("#gameBoardPanel");
+  const game = activeThread?.gameId ? gameRows.find((entry) => entry.id === activeThread.gameId) : null;
+  panel.hidden = !game;
+  if (!game) return;
+  const myHandle = settings.profile?.handle;
+  const myMark = game.x_handle === myHandle ? "x" : "o";
+  const canMove = game.status === "active" && game.turn_handle === myHandle;
+  panel.innerHTML = `<header><div><span class="eyebrow">Game Lobby</span><h3>${escapeHtml(getGameTitle(game.type))}</h3></div><strong>${canMove ? "Your turn" : escapeHtml(game.status === "active" ? `Waiting for ${game.turn_handle}` : game.status.replaceAll("_", " "))}</strong></header><p>${escapeHtml(getGameRules(game.type))}</p><div id="activeGameSurface"></div>`;
+  const surface = $("#activeGameSurface");
+  if (game.type === "tic_tac_toe") {
+    const board = normalizeArray(game.board, 9);
+    surface.innerHTML = `<div class="game-grid tic">${board.map((mark, index) => `<button class="game-cell ${mark}" data-cell="${index}" ${!canMove || mark ? "disabled" : ""}>${mark.toUpperCase()}</button>`).join("")}</div>`;
+    surface.querySelectorAll("[data-cell]").forEach((button) => button.addEventListener("click", () => playTicTacToeMove(game, Number(button.dataset.cell))));
+  } else if (game.type === "connect_four") {
+    const board = normalizeArray(game.board, 42);
+    surface.innerHTML = `<div class="game-grid connect">${board.map((mark, index) => `<button class="game-cell ${mark}" data-column="${index % 7}" ${!canMove ? "disabled" : ""}>${mark ? "●" : ""}</button>`).join("")}</div>`;
+    surface.querySelectorAll("[data-column]").forEach((button) => button.addEventListener("click", () => playConnectFourMove(game, Number(button.dataset.column))));
+  } else if (game.type === "word_chain") {
+    const words = Array.isArray(game.board) ? game.board : [];
+    surface.innerHTML = `<div class="word-chain-list">${words.map((word) => `<span>${escapeHtml(word)}</span>`).join("") || "<span>Start the chain</span>"}</div><form id="wordChainForm"><input id="wordChainInput" placeholder="Next word" ${!canMove ? "disabled" : ""} /><button class="primary-action small" ${!canMove ? "disabled" : ""}>Play</button></form>`;
+    $("#wordChainForm").addEventListener("submit", (event) => { event.preventDefault(); playWordChainMove(game, $("#wordChainInput").value); });
+  } else {
+    const board = normalizeBattleship(game.board);
+    const enemy = myMark === "x" ? "o" : "x";
+    surface.innerHTML = `<p>Tap enemy waters to fire.</p><div class="game-grid battleship">${Array.from({ length: 25 }, (_, index) => {
+      const shot = board.shots[myMark].includes(index);
+      const hit = shot && board.ships[enemy].includes(index);
+      return `<button class="game-cell ${hit ? "hit" : shot ? "miss" : ""}" data-cell="${index}" ${!canMove || shot ? "disabled" : ""}>${hit ? "×" : shot ? "·" : ""}</button>`;
+    }).join("")}</div>`;
+    surface.querySelectorAll("[data-cell]").forEach((button) => button.addEventListener("click", () => playBattleshipMove(game, Number(button.dataset.cell))));
+  }
+}
+
+function normalizeArray(board, size) {
+  const next = Array.isArray(board) ? [...board] : [];
+  while (next.length < size) next.push("");
+  return next.slice(0, size);
+}
+
+function normalizeBattleship(board) {
+  return board && !Array.isArray(board) ? board : { ships: { x: [0, 1, 2, 10, 11], o: [3, 4, 5, 20, 21] }, shots: { x: [], o: [] } };
+}
+
+async function saveGameMove(game, board, status, mark) {
+  const nextTurn = mark === "x" ? game.o_handle : game.x_handle;
+  await fetch(`${SUPABASE_URL}/rest/v1/${GAMES_TABLE}?id=eq.${encodeURIComponent(game.id)}`, {
+    method: "PATCH",
+    headers: getHeaders({ "Content-Type": "application/json", Prefer: "return=minimal" }),
+    body: JSON.stringify({ board, status, turn_handle: status === "active" ? nextTurn : game.turn_handle, updated_at: new Date().toISOString() }),
+  });
+  await sendRemoteMessage(nextTurn, `${getGameTitle(game.type)} move`, `${settings.profile.handle} made a move. ${status === "active" ? "Your turn." : status.replaceAll("_", " ")}.`, { gameId: game.id });
+  await fetchMessages();
+}
+
+function getTicTacToeStatus(board) {
+  const wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+  for (const [a,b,c] of wins) if (board[a] && board[a] === board[b] && board[a] === board[c]) return `${board[a]}_won`;
+  return board.every(Boolean) ? "draw" : "active";
+}
+
+async function playTicTacToeMove(game, index) {
+  const board = normalizeArray(game.board, 9);
+  if (game.turn_handle !== settings.profile.handle || board[index]) return;
+  const mark = game.x_handle === settings.profile.handle ? "x" : "o";
+  board[index] = mark;
+  await saveGameMove(game, board, getTicTacToeStatus(board), mark);
+}
+
+async function playConnectFourMove(game, column) {
+  const board = normalizeArray(game.board, 42);
+  if (game.turn_handle !== settings.profile.handle || board[column]) return;
+  const mark = game.x_handle === settings.profile.handle ? "x" : "o";
+  for (let row = 5; row >= 0; row -= 1) if (!board[row * 7 + column]) { board[row * 7 + column] = mark; break; }
+  const won = board.some((cell, index) => cell && [[1,0],[0,1],[1,1],[1,-1]].some(([dc,dr]) => Array.from({ length: 4 }, (_, step) => {
+    const row = Math.floor(index / 7) + dr * step;
+    const col = index % 7 + dc * step;
+    return row >= 0 && row < 6 && col >= 0 && col < 7 && board[row * 7 + col] === cell;
+  }).every(Boolean)));
+  await saveGameMove(game, board, won ? `${mark}_won` : board.every(Boolean) ? "draw" : "active", mark);
+}
+
+async function playWordChainMove(game, rawWord) {
+  const words = Array.isArray(game.board) ? [...game.board] : [];
+  const word = rawWord.toLowerCase().replace(/[^a-z]/g, "");
+  if (word.length < 2 || words.includes(word) || (words.length && word[0] !== words.at(-1).at(-1))) return toast("Use a new word that begins with the last letter.");
+  words.push(word);
+  await saveGameMove(game, words, "active", game.x_handle === settings.profile.handle ? "x" : "o");
+}
+
+async function playBattleshipMove(game, index) {
+  const board = normalizeBattleship(game.board);
+  const mark = game.x_handle === settings.profile.handle ? "x" : "o";
+  const enemy = mark === "x" ? "o" : "x";
+  if (game.turn_handle !== settings.profile.handle || board.shots[mark].includes(index)) return;
+  board.shots[mark].push(index);
+  const won = board.ships[enemy].every((cell) => board.shots[mark].includes(cell));
+  await saveGameMove(game, board, won ? `${mark}_won` : "active", mark);
 }
 
 function renderReader() {
@@ -304,6 +556,7 @@ function renderReader() {
   $("#threadTitle").textContent = activeThread.title;
   $("#threadSubtitle").textContent = `${activeThread.people} · ${activeThread.messages.length} message${activeThread.messages.length === 1 ? "" : "s"} · read receipt ${activeThread.receipt}`;
   $("#threadLabels").textContent = activeThread.labels;
+  $("#detailPresence").textContent = activeTypingHandle() ? `${activeTypingHandle()} is typing...` : "Live conversation";
   $("#summaryText").textContent = activeThread.summary;
   const status = $("#threadStatus");
   status.textContent = activeThread.status;
@@ -311,6 +564,7 @@ function renderReader() {
   $("#statusSelect").value = activeThread.status;
   renderMessages();
   renderActions();
+  renderGameBoard();
 }
 
 function render() {
@@ -321,6 +575,7 @@ function render() {
     ? `${threads.length} active conversation${threads.length === 1 ? "" : "s"}`
     : "No inbox activity yet";
   $("#readHealth").textContent = threads.length ? "100%" : "--";
+  renderSidebarData();
   renderSettings();
   if (window.lucide) window.lucide.createIcons();
 }
@@ -494,16 +749,19 @@ $("#notificationButton").addEventListener("click", () => {
   $("#notifyReplies").checked = Boolean(settings.notifications?.replies);
   $("#notifyMentions").checked = Boolean(settings.notifications?.mentions);
   $("#notifyFollowups").checked = Boolean(settings.notifications?.followups);
+  $("#notifyDevice").checked = Boolean(settings.notifications?.device);
   openSettingsDialog($("#notificationDialog"));
 });
-$("#notificationForm").addEventListener("submit", (event) => {
+$("#notificationForm").addEventListener("submit", async (event) => {
   if (event.submitter?.value === "cancel") return;
   event.preventDefault();
   settings.notifications = {
     replies: $("#notifyReplies").checked,
     mentions: $("#notifyMentions").checked,
     followups: $("#notifyFollowups").checked,
+    device: $("#notifyDevice").checked,
   };
+  if (settings.notifications.device && "Notification" in window && Notification.permission === "default") await Notification.requestPermission();
   saveSettings();
   $("#notificationDialog").close();
   toast("Notification rules saved.");
@@ -673,7 +931,8 @@ $("#statusSelect").addEventListener("change", (event) => {
   toast(`Thread marked ${activeThread.status}.`);
 });
 $("#semanticSearch").addEventListener("input", (event) => {
-  if (event.target.value.length > 2) toast(threads.length ? `Searching for "${event.target.value}".` : "There are no conversations to search yet.");
+  searchText = event.target.value.trim().toLowerCase();
+  renderThreads();
 });
 
 document.querySelectorAll(".nav-list button, .folder, .saved-search, .chip").forEach((button) => {
@@ -683,8 +942,115 @@ document.querySelectorAll(".nav-list button, .folder, .saved-search, .chip").for
       button.classList.add("active");
     }
     if (!threads.length) toast("There are no conversations here yet.");
+    if (button.matches(".chip")) {
+      threadFilter = button.textContent.trim();
+      renderThreads();
+    }
   });
 });
+
+async function sendTypingState(isTyping) {
+  if (!activeThread || !isValidHandle(settings.profile?.handle || "") || !isValidHandle(activeThread.people)) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/${TYPING_TABLE}?on_conflict=sender_handle,recipient_handle,subject_key`, {
+      method: "POST",
+      headers: getHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }),
+      body: JSON.stringify([{
+        sender_handle: settings.profile.handle,
+        recipient_handle: activeThread.people,
+        subject_key: activeThread.title.toLowerCase().slice(0, 120),
+        is_typing: Boolean(isTyping),
+        updated_at: new Date().toISOString(),
+      }]),
+    });
+  } catch {
+    // Typing indicators are optional.
+  }
+}
+
+$("#replyBox").addEventListener("input", () => {
+  const now = Date.now();
+  if (now - lastTypingSentAt > 1800) {
+    lastTypingSentAt = now;
+    sendTypingState(true);
+  }
+  window.clearTimeout(typingIdleTimer);
+  typingIdleTimer = window.setTimeout(() => sendTypingState(false), 3500);
+});
+
+function readFileAsDataUrl(file, maxBytes) {
+  if (!file || file.size > maxBytes) throw new Error(`Keep attachments under ${Math.round(maxBytes / 1024)} KB.`);
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Could not read that file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function sendAttachment(prefix, payload, label) {
+  if (!activeThread) return toast("Open a conversation first.");
+  try {
+    await sendRemoteMessage(activeThread.people, activeThread.title, `${prefix}${JSON.stringify(payload)}\n${label}`);
+    toast(`${label} sent.`);
+    await fetchMessages();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+$("#photoButton").addEventListener("click", () => $("#photoInput").click());
+$("#fileButton").addEventListener("click", () => $("#fileInput").click());
+$("#photoInput").addEventListener("change", async (event) => {
+  try {
+    const file = event.target.files[0];
+    await sendAttachment(PHOTO_PREFIX, { url: await readFileAsDataUrl(file, 500 * 1024), name: file.name }, "Photo");
+  } catch (error) { toast(error.message); }
+  event.target.value = "";
+});
+$("#fileInput").addEventListener("change", async (event) => {
+  try {
+    const file = event.target.files[0];
+    await sendAttachment(FILE_PREFIX, { url: await readFileAsDataUrl(file, 250 * 1024), name: file.name }, "File");
+  } catch (error) { toast(error.message); }
+  event.target.value = "";
+});
+
+$("#voiceNoteButton").addEventListener("click", async () => {
+  if (voiceRecorder?.state === "recording") {
+    voiceRecorder.stop();
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast("Voice notes are not supported in this browser.");
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    voiceChunks = [];
+    voiceRecorder = new MediaRecorder(stream);
+    voiceRecorder.ondataavailable = (event) => voiceChunks.push(event.data);
+    voiceRecorder.onstop = async () => {
+      stream.getTracks().forEach((track) => track.stop());
+      const blob = new Blob(voiceChunks, { type: voiceRecorder.mimeType });
+      if (blob.size > 500 * 1024) return toast("Keep voice notes short, under 500 KB.");
+      const file = new File([blob], "voice-note.webm", { type: blob.type });
+      await sendAttachment(VOICE_NOTE_PREFIX, { url: await readFileAsDataUrl(file, 500 * 1024) }, "Voice note");
+      $("#voiceNoteButton").classList.remove("active");
+    };
+    voiceRecorder.start();
+    $("#voiceNoteButton").classList.add("active");
+    toast("Recording voice note. Tap the microphone again to send.");
+  } catch {
+    toast("Microphone permission was not granted.");
+  }
+});
+
+$("#inlineAiButton").addEventListener("click", () => {
+  const context = activeThread ? `Help me reply in "${activeThread.title}" with ${activeThread.people}. ` : "";
+  $("#aiPrompt").value = context;
+  openSettingsDialog($("#aiDialog"));
+});
+$("#sidebarNotificationsButton").addEventListener("click", () => $("#notificationButton").click());
+$("#sidebarProfileButton").addEventListener("click", () => $("#profileButton").click());
+$("#installHelpButton").addEventListener("click", () => openSettingsDialog($("#installDialog")));
 
 render();
 fetchMessages();
