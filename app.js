@@ -1,7 +1,6 @@
 const SUPABASE_URL = "https://jbljqusdpifdyewlenun.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_RYq_rDXqj_Ate8B66PcJEQ_a6yv1YUl";
 const MESSAGES_TABLE = "threadmail_messages";
-const HANDLES_RPC = "threadmail_claim_handle";
 const GAME_PREFIX = "THREADLINE_GAME::";
 const AI_HANDLE = "threadai";
 let threads = [];
@@ -33,10 +32,6 @@ function isValidHandle(value) {
 
 function encodePasscode(value) {
   return btoa(unescape(encodeURIComponent(String(value || ""))));
-}
-
-function createOwnerToken() {
-  return window.crypto?.randomUUID ? `${window.crypto.randomUUID()}-${Date.now()}` : `owner-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function escapeHtml(value) {
@@ -86,17 +81,6 @@ async function createGame(sender, recipient, type) {
   const payload = await response.json().catch(() => []);
   if (!response.ok || !payload[0]?.id) throw new Error("Game could not be created.");
   return payload[0].id;
-}
-
-async function claimHandle(handle, passcodeHash, ownerToken) {
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${HANDLES_RPC}`, {
-    method: "POST",
-    headers: getHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ p_handle: handle, p_owner_token: ownerToken, p_code_hash: passcodeHash || null }),
-  });
-  const payload = await response.json().catch(() => "");
-  if (!response.ok) throw new Error("Could not protect that handle.");
-  return String(payload || "");
 }
 
 async function sendRemoteMessage(recipient, subject, body, options = {}) {
@@ -399,35 +383,11 @@ $("#profileForm").addEventListener("submit", async (event) => {
   }
   const passcode = $("#profilePasscode").value.trim();
   const passcodeHash = passcode ? encodePasscode(passcode) : settings.passcodeHash || "";
-  const ownerToken = settings.profile?.ownerToken || createOwnerToken();
-  try {
-    const claim = await claimHandle(handle, passcodeHash, ownerToken);
-    if (claim === "locked") {
-      toast("That handle is protected. Enter its matching app passcode.");
-      return;
-    }
-    if (claim === "reserved") {
-      toast("That handle is reserved. Choose another.");
-      return;
-    }
-    if (claim === "taken_unprotected") {
-      toast("That handle is already in use. Choose another.");
-      return;
-    }
-    if (claim.startsWith("invalid")) {
-      toast("Use 3-24 letters, numbers, or underscores.");
-      return;
-    }
-  } catch (error) {
-    toast(error.message);
-    return;
-  }
   settings.profile = {
     name: $("#profileName").value.trim(),
     handle,
     email: $("#profileEmail").value.trim(),
     workspace: $("#profileWorkspace").value.trim(),
-    ownerToken,
   };
   if (passcode) {
     settings.passcodeHash = passcodeHash;
