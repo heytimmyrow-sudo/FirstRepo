@@ -366,6 +366,7 @@ body.filters-open .filter-row {
 .thread-list {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .thread-list-empty,
@@ -401,6 +402,8 @@ body.filters-open .filter-row {
 .thread-card {
   display: grid;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
   width: 100%;
   padding: 12px;
   text-align: left;
@@ -416,6 +419,12 @@ body.filters-open .filter-row {
 
 .thread-card strong {
   font-size: 14px;
+}
+
+.thread-card strong,
+.thread-card > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .thread-meta {
