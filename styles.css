@@ -61,6 +61,11 @@ button {
   min-height: 100vh;
 }
 
+.mobile-sidebar-toggle,
+.sidebar-scrim {
+  display: none;
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -915,18 +920,39 @@ svg {
   }
 
   .sidebar {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    flex-direction: row;
-    justify-content: space-between;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 12;
+    width: min(86vw, 320px);
+    overflow: auto;
+    transform: translateX(-105%);
+    transition: transform 180ms ease;
+    box-shadow: var(--shadow);
   }
 
-  .nav-list,
-  .compose-box .icon-button {
-    display: none;
+  body.sidebar-open {
+    overflow: hidden;
+  }
+
+  body.sidebar-open .sidebar {
+    transform: translateX(0);
+  }
+
+  .mobile-sidebar-toggle {
+    display: grid;
+  }
+
+  .sidebar-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 11;
+    border: 0;
+    padding: 0;
+    background: rgba(23, 32, 51, 0.46);
+  }
+
+  body.sidebar-open .sidebar-scrim {
+    display: block;
   }
 
   .workspace {

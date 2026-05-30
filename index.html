@@ -71,6 +71,7 @@
             <input id="semanticSearch" type="search" placeholder="Semantic search threads, decisions, files, people" />
           </div>
           <div class="top-actions">
+            <button class="icon-button mobile-sidebar-toggle" title="Show sidebar" id="sidebarToggleButton" aria-expanded="false"><i data-lucide="menu"></i></button>
             <button class="icon-button" title="Refresh messages" id="refreshButton"><i data-lucide="refresh-cw"></i></button>
             <button class="icon-button" title="Message ThreadAI" id="threadAiButton"><i data-lucide="sparkles"></i></button>
             <button class="icon-button" title="Tutorial" id="tutorialButton"><i data-lucide="circle-help"></i></button>
@@ -222,6 +223,7 @@
         </div>
       </main>
     </div>
+    <button class="sidebar-scrim" type="button" id="sidebarScrim" aria-label="Close sidebar"></button>
 
     <dialog class="compose-dialog" id="composeDialog">
       <form method="dialog" id="composeForm">

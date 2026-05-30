@@ -367,6 +367,16 @@ $("#snoozeButton").addEventListener("click", () => toast("Thread snoozed until F
 $("#approvalButton").addEventListener("click", () => toast("Approval request created."));
 $("#undoSendButton").addEventListener("click", () => toast("Last send canceled. Draft restored."));
 $("#shortcutButton").addEventListener("click", () => toast("Shortcuts: C compose, E resolve, S snooze, / search."));
+function setSidebarOpen(open) {
+  document.body.classList.toggle("sidebar-open", open);
+  $("#sidebarToggleButton").setAttribute("aria-expanded", String(open));
+}
+
+$("#sidebarToggleButton").addEventListener("click", () => setSidebarOpen(!document.body.classList.contains("sidebar-open")));
+$("#sidebarScrim").addEventListener("click", () => setSidebarOpen(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setSidebarOpen(false);
+});
 $("#readerToolsButton").addEventListener("click", () => {
   const panel = $("#readerToolsPanel");
   panel.hidden = !panel.hidden;
