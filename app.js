@@ -406,8 +406,16 @@ $("#profileForm").addEventListener("submit", async (event) => {
       toast("That handle is protected. Enter its matching app passcode.");
       return;
     }
-    if (claim === "reserved" || claim === "taken_unprotected" || claim.startsWith("invalid")) {
-      toast("That handle is unavailable. Choose another.");
+    if (claim === "reserved") {
+      toast("That handle is reserved. Choose another.");
+      return;
+    }
+    if (claim === "taken_unprotected") {
+      toast("That handle is already in use. Choose another.");
+      return;
+    }
+    if (claim.startsWith("invalid")) {
+      toast("Use 3-24 letters, numbers, or underscores.");
       return;
     }
   } catch (error) {
