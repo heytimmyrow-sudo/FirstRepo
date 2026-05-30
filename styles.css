@@ -891,8 +891,7 @@ svg {
   .nav-list button span,
   .nav-list button:not(.active),
   .side-section,
-  .sidebar-footer,
-  .primary-action:not(.small) {
+  .sidebar-footer {
     display: none;
   }
 
