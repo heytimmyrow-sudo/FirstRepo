@@ -65,6 +65,8 @@
             <input id="semanticSearch" type="search" placeholder="Semantic search threads, decisions, files, people" />
           </div>
           <div class="top-actions">
+            <button class="icon-button" title="Refresh messages" id="refreshButton"><i data-lucide="refresh-cw"></i></button>
+            <button class="icon-button" title="Message ThreadAI" id="threadAiButton"><i data-lucide="sparkles"></i></button>
             <button class="icon-button" title="Keyboard shortcuts" id="shortcutButton"><i data-lucide="keyboard"></i></button>
             <button class="icon-button" title="Notification rules" id="notificationButton"><i data-lucide="bell-ring"></i></button>
             <button class="profile-button" title="Profile" id="profileButton"><span id="profileMark"><i data-lucide="user"></i></span></button>
@@ -166,7 +168,7 @@
                 </select>
                 <button class="ghost-button" id="toneButton">Warmer</button>
                 <button class="ghost-button">Firmer</button>
-                <button class="primary-action small"><i data-lucide="send-horizontal"></i> Send Later</button>
+                <button class="primary-action small" id="sendReplyButton"><i data-lucide="send-horizontal"></i> Send</button>
               </div>
             </div>
           </section>
@@ -216,9 +218,19 @@
           <h2>New message</h2>
           <button class="icon-button" type="button" data-close-dialog onclick="this.closest('dialog').close()" title="Close compose"><i data-lucide="x"></i></button>
         </div>
-        <label>To<input id="composeTo" type="email" required placeholder="name@example.com" /></label>
+        <label>To handle<input id="composeTo" required placeholder="example: ari" /></label>
         <label>Subject<input id="composeSubject" required placeholder="Subject" /></label>
         <label>Message<textarea id="composeMessage" required placeholder="Write your message"></textarea></label>
+        <section class="game-attach-panel" aria-label="Attach a game">
+          <span>Attach game: <strong id="gameAttachLabel">None</strong></span>
+          <div>
+            <button class="ghost-button" type="button" data-game="tic_tac_toe">Tic-Tac-Toe</button>
+            <button class="ghost-button" type="button" data-game="connect_four">Connect Four</button>
+            <button class="ghost-button" type="button" data-game="battleship">Battleship</button>
+            <button class="ghost-button" type="button" data-game="word_chain">Word Chain</button>
+            <button class="ghost-button" type="button" data-game="">Clear</button>
+          </div>
+        </section>
         <div class="compose-dialog-actions">
           <button class="ghost-button" type="button" data-close-dialog onclick="this.closest('dialog').close()">Cancel</button>
           <button class="primary-action small" id="sendMessageButton" value="default"><i data-lucide="send-horizontal"></i> Send</button>
@@ -233,8 +245,10 @@
           <button class="icon-button" type="button" data-close-dialog onclick="this.closest('dialog').close()" title="Close profile"><i data-lucide="x"></i></button>
         </div>
         <label>Name<input id="profileName" required placeholder="Your name" /></label>
-        <label>Email<input id="profileEmail" type="email" required placeholder="you@example.com" /></label>
+        <label>Threadline handle<input id="profileHandle" required placeholder="example: ari" /></label>
+        <label>Email<input id="profileEmail" type="email" placeholder="you@example.com" /></label>
         <label>Workspace<input id="profileWorkspace" placeholder="Workspace name" /></label>
+        <label>App passcode<input id="profilePasscode" type="password" placeholder="Optional device passcode" /></label>
         <div class="compose-dialog-actions">
           <button class="ghost-button" type="button" data-close-dialog onclick="this.closest('dialog').close()">Cancel</button>
           <button class="primary-action small" value="default"><i data-lucide="save"></i> Save</button>
@@ -273,6 +287,31 @@
         </div>
       </form>
     </dialog>
+
+    <dialog class="compose-dialog" id="aiDialog">
+      <form method="dialog" id="aiForm">
+        <div class="compose-dialog-header">
+          <h2>ThreadAI</h2>
+          <button class="icon-button" type="button" data-close-dialog onclick="this.closest('dialog').close()" title="Close ThreadAI"><i data-lucide="x"></i></button>
+        </div>
+        <p class="dialog-help">Ask for a reply, rewrite, summary, or idea. ThreadAI appears as a conversation in your inbox.</p>
+        <label>Message<textarea id="aiPrompt" required placeholder="What should I say back?"></textarea></label>
+        <div class="compose-dialog-actions">
+          <button class="ghost-button" type="button" data-close-dialog onclick="this.closest('dialog').close()">Cancel</button>
+          <button class="primary-action small" value="default"><i data-lucide="sparkles"></i> Ask ThreadAI</button>
+        </div>
+      </form>
+    </dialog>
+
+    <section class="app-lock" id="appLock" hidden>
+      <form class="app-lock-card" id="unlockForm">
+        <span class="eyebrow">Threadline</span>
+        <h2>Enter passcode</h2>
+        <input id="unlockCode" type="password" autocomplete="current-password" placeholder="Passcode" />
+        <button class="primary-action" type="submit">Unlock</button>
+        <p class="dialog-help" id="lockStatus">This device is locked.</p>
+      </form>
+    </section>
 
     <div class="toast" id="toast" role="status"></div>
     <script src="app.js"></script>

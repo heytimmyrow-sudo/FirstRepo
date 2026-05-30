@@ -1,12 +1,164 @@
-const threads = [];
+const SUPABASE_URL = "https://jbljqusdpifdyewlenun.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_RYq_rDXqj_Ate8B66PcJEQ_a6yv1YUl";
+const MESSAGES_TABLE = "threadmail_messages";
+const HANDLES_RPC = "threadmail_claim_handle";
+const GAME_PREFIX = "THREADLINE_GAME::";
+const AI_HANDLE = "threadai";
+let threads = [];
 
 let activeThread = null;
 let quotesCleaned = false;
 let topicsSplit = false;
 let showAllMessages = false;
-let settings = JSON.parse(localStorage.getItem("threadlineSettings") || "{}");
+let pendingGameType = "";
+let settings = loadSettings();
 
 const $ = (selector) => document.querySelector(selector);
+
+function loadSettings() {
+  try {
+    return JSON.parse(localStorage.getItem("threadlineSettings") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function normalizeHandle(value) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 24);
+}
+
+function isValidHandle(value) {
+  return /^[a-z0-9_]{3,24}$/.test(value);
+}
+
+function encodePasscode(value) {
+  return btoa(unescape(encodeURIComponent(String(value || ""))));
+}
+
+function createOwnerToken() {
+  return window.crypto?.randomUUID ? `${window.crypto.randomUUID()}-${Date.now()}` : `owner-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function escapeHtml(value) {
+  const el = document.createElement("div");
+  el.textContent = String(value ?? "");
+  return el.innerHTML;
+}
+
+function getHeaders(extra = {}) {
+  return { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, ...extra };
+}
+
+function getGameTitle(type) {
+  return {
+    tic_tac_toe: "Tic-Tac-Toe",
+    connect_four: "Connect Four",
+    battleship: "Battleship",
+    word_chain: "Word Chain",
+  }[type] || "";
+}
+
+function getGameRules(type) {
+  if (type === "connect_four") return "Players take turns dropping discs into columns. First to connect four wins.";
+  if (type === "battleship") return "Fire at enemy waters on your turn. Sink every enemy ship to win.";
+  if (type === "word_chain") return "Each new word must start with the last letter of the previous word.";
+  return "Players take turns placing marks. First to get three in a row wins.";
+}
+
+function unpackBody(body) {
+  const match = String(body || "").match(/^THREADLINE_GAME::([a-z_]+)\n?/);
+  return { body: String(body || "").replace(/^THREADLINE_GAME::[a-z_]+\n?/, ""), game: match?.[1] || "" };
+}
+
+async function createGame(sender, recipient, type) {
+  const board = type === "connect_four"
+    ? Array(42).fill("")
+    : type === "battleship"
+      ? { size: 5, ships: { x: [0, 1, 2, 10, 11], o: [3, 4, 5, 20, 21] }, shots: { x: [], o: [] } }
+      : type === "word_chain"
+        ? []
+        : Array(9).fill("");
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/threadmail_games`, {
+    method: "POST",
+    headers: getHeaders({ "Content-Type": "application/json", Prefer: "return=representation" }),
+    body: JSON.stringify([{ type, x_handle: sender, o_handle: recipient, turn_handle: sender, board, status: "active" }]),
+  });
+  const payload = await response.json().catch(() => []);
+  if (!response.ok || !payload[0]?.id) throw new Error("Game could not be created.");
+  return payload[0].id;
+}
+
+async function claimHandle(handle, passcodeHash, ownerToken) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${HANDLES_RPC}`, {
+    method: "POST",
+    headers: getHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ p_handle: handle, p_owner_token: ownerToken, p_code_hash: passcodeHash || null }),
+  });
+  const payload = await response.json().catch(() => "");
+  if (!response.ok) throw new Error("Could not protect that handle.");
+  return String(payload || "");
+}
+
+async function sendRemoteMessage(recipient, subject, body, options = {}) {
+  const sender = normalizeHandle(options.sender || settings.profile?.handle || "");
+  if (!isValidHandle(sender)) throw new Error("Add a 3-24 character Threadline handle in Profile first.");
+  const normalizedRecipient = normalizeHandle(recipient);
+  if (!isValidHandle(normalizedRecipient)) throw new Error("Use a valid 3-24 character recipient handle.");
+  const gameId = options.gameType ? await createGame(sender, normalizedRecipient, options.gameType) : null;
+  const message = { sender_handle: sender, recipient_handle: normalizedRecipient, subject, body };
+  if (gameId) message.game_id = gameId;
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}`, {
+    method: "POST",
+    headers: getHeaders({ "Content-Type": "application/json", Prefer: "return=representation" }),
+    body: JSON.stringify([message]),
+  });
+  if (!response.ok) throw new Error("Message could not be sent. Check your connection and try again.");
+}
+
+async function fetchMessages() {
+  const handle = normalizeHandle(settings.profile?.handle || "");
+  if (!isValidHandle(handle) || (settings.passcodeHash && sessionStorage.getItem("threadlineUnlocked") !== "1")) return;
+  try {
+    const query = `or=(sender_handle.eq.${handle},recipient_handle.eq.${handle})&order=created_at.desc&limit=200`;
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}?${query}`, { headers: getHeaders() });
+    if (!response.ok) throw new Error();
+    const rows = await response.json();
+    const groups = new Map();
+    rows.forEach((row) => {
+      const other = row.sender_handle === handle ? row.recipient_handle : row.sender_handle;
+      const key = `${other}|${row.subject}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    });
+    threads = [...groups.entries()].map(([key, rows]) => {
+      rows.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      const [other, title] = key.split("|");
+      const latest = rows[rows.length - 1];
+      const decoded = unpackBody(latest.body);
+      return {
+        id: key,
+        title,
+        people: other,
+        status: "Open",
+        labels: decoded.game ? `Game: ${getGameTitle(decoded.game)}` : "Live",
+        urgency: "Normal",
+        receipt: "Synced",
+        summary: decoded.game ? `${other} shared a ${getGameTitle(decoded.game)} game.` : decoded.body.slice(0, 120),
+        changed: "Synced from live messaging.",
+        actions: [],
+        messages: rows.map((row) => {
+          const unpacked = unpackBody(row.body);
+          const game = unpacked.game ? `\n\nGame invite: ${getGameTitle(unpacked.game)}` : "";
+          return [row.sender_handle === handle ? "You" : row.sender_handle, new Date(row.created_at).toLocaleString(), `${unpacked.body}${game}`, unpacked.game ? "Game" : "Message"];
+        }),
+      };
+    });
+    activeThread = activeThread ? threads.find((thread) => thread.id === activeThread.id) || null : threads[0] || null;
+    render();
+  } catch {
+    toast("Could not refresh live messages.");
+  }
+}
 
 function toast(message) {
   const el = $("#toast");
@@ -37,6 +189,7 @@ function renderSettings() {
     : '<i data-lucide="plug-zap"></i> Connect inbox';
   $("#themeToggle").checked = Boolean(settings.darkMode);
   document.body.classList.toggle("dark", Boolean(settings.darkMode));
+  $("#appLock").hidden = !settings.passcodeHash || sessionStorage.getItem("threadlineUnlocked") === "1";
   if (window.lucide) window.lucide.createIcons();
 }
 
@@ -53,10 +206,10 @@ function renderThreads() {
   list.innerHTML = threads
     .map(
       (thread) => `
-        <button class="thread-card ${thread.id === activeThread.id ? "active" : ""}" data-id="${thread.id}">
-          <strong>${thread.title}</strong>
-          <span>${thread.summary}</span>
-          <span class="thread-meta"><span>${thread.people}</span><span>${thread.urgency}</span></span>
+        <button class="thread-card ${thread.id === activeThread?.id ? "active" : ""}" data-id="${escapeHtml(thread.id)}">
+          <strong>${escapeHtml(thread.title)}</strong>
+          <span>${escapeHtml(thread.summary)}</span>
+          <span class="thread-meta"><span>${escapeHtml(thread.people)}</span><span>${escapeHtml(thread.urgency)}</span></span>
         </button>
       `,
     )
@@ -64,7 +217,7 @@ function renderThreads() {
 
   list.querySelectorAll(".thread-card").forEach((button) => {
     button.addEventListener("click", () => {
-      activeThread = threads.find((thread) => thread.id === Number(button.dataset.id));
+      activeThread = threads.find((thread) => String(thread.id) === button.dataset.id);
       quotesCleaned = false;
       topicsSplit = false;
       showAllMessages = false;
@@ -88,13 +241,13 @@ function renderMessages() {
         <article class="message" data-index="${index}">
           <div class="message-head">
             <div>
-              <strong>${sender}</strong>
-              <span class="thread-meta">${time}</span>
+              <strong>${escapeHtml(sender)}</strong>
+              <span class="thread-meta">${escapeHtml(time)}</span>
             </div>
             <button class="collapse-button">${index === 0 ? "Collapse" : "Expand"}</button>
           </div>
-          ${topicsSplit ? `<span class="topic-tag">${topic}</span>` : ""}
-          <p class="message-body ${body.includes(">") && !quotesCleaned ? "quote" : ""}">${cleanBody}</p>
+          ${topicsSplit ? `<span class="topic-tag">${escapeHtml(topic)}</span>` : ""}
+          <p class="message-body ${body.includes(">") && !quotesCleaned ? "quote" : ""}">${escapeHtml(cleanBody)}</p>
         </article>
       `;
     };
@@ -229,22 +382,53 @@ document.querySelectorAll("dialog").forEach((dialog) => {
 
 $("#profileButton").addEventListener("click", () => {
   $("#profileName").value = settings.profile?.name || "";
+  $("#profileHandle").value = settings.profile?.handle || "";
   $("#profileEmail").value = settings.profile?.email || "";
   $("#profileWorkspace").value = settings.profile?.workspace || "";
+  $("#profilePasscode").value = "";
   openSettingsDialog($("#profileDialog"));
 });
-$("#profileForm").addEventListener("submit", (event) => {
+$("#profileForm").addEventListener("submit", async (event) => {
   if (event.submitter?.value === "cancel") return;
   event.preventDefault();
   if (!event.currentTarget.reportValidity()) return;
+  const handle = normalizeHandle($("#profileHandle").value);
+  if (!isValidHandle(handle)) {
+    toast("Handle must be 3-24 letters, numbers, or underscores.");
+    return;
+  }
+  const passcode = $("#profilePasscode").value.trim();
+  const passcodeHash = passcode ? encodePasscode(passcode) : settings.passcodeHash || "";
+  const ownerToken = settings.profile?.ownerToken || createOwnerToken();
+  try {
+    const claim = await claimHandle(handle, passcodeHash, ownerToken);
+    if (claim === "locked") {
+      toast("That handle is protected. Enter its matching app passcode.");
+      return;
+    }
+    if (claim === "reserved" || claim === "taken_unprotected" || claim.startsWith("invalid")) {
+      toast("That handle is unavailable. Choose another.");
+      return;
+    }
+  } catch (error) {
+    toast(error.message);
+    return;
+  }
   settings.profile = {
     name: $("#profileName").value.trim(),
+    handle,
     email: $("#profileEmail").value.trim(),
     workspace: $("#profileWorkspace").value.trim(),
+    ownerToken,
   };
+  if (passcode) {
+    settings.passcodeHash = passcodeHash;
+    sessionStorage.setItem("threadlineUnlocked", "1");
+  }
   saveSettings();
   $("#profileDialog").close();
   toast("Profile saved.");
+  fetchMessages();
 });
 
 $("#notificationButton").addEventListener("click", () => {
@@ -285,37 +469,99 @@ $("#inboxForm").addEventListener("submit", (event) => {
 });
 document.querySelector('[title="Filters"]').addEventListener("click", () => toast(threads.length ? "Choose a filter below." : "There are no conversations to filter yet."));
 function openCompose() {
+  pendingGameType = "";
+  $("#gameAttachLabel").textContent = "None";
   $("#composeDialog").showModal();
   $("#composeTo").focus();
 }
 
 $("#composeButton").addEventListener("click", openCompose);
 $("#emptyComposeButton").addEventListener("click", openCompose);
-$("#composeForm").addEventListener("submit", (event) => {
+$("#composeForm").addEventListener("submit", async (event) => {
   if (event.submitter?.value === "cancel") return;
   event.preventDefault();
   if (!event.currentTarget.reportValidity()) return;
-  const recipient = $("#composeTo").value.trim();
+  const recipient = normalizeHandle($("#composeTo").value);
   const subject = $("#composeSubject").value.trim();
-  const body = $("#composeMessage").value.trim();
-  threads.unshift({
-    id: Date.now(),
-    title: subject,
-    people: recipient,
-    status: "Open",
-    labels: "Sent",
-    urgency: "Normal",
-    receipt: "Pending",
-    summary: "A newly sent conversation. AI summary will appear after replies arrive.",
-    changed: "This conversation was just created.",
-    actions: [],
-    messages: [["You", "Just now", body, "Sent"]],
+  const message = $("#composeMessage").value.trim();
+  const body = pendingGameType ? `${GAME_PREFIX}${pendingGameType}\n${message}\n\n${getGameRules(pendingGameType)}` : message;
+  try {
+    await sendRemoteMessage(recipient, subject, body, { gameType: pendingGameType });
+    event.currentTarget.reset();
+    $("#composeDialog").close();
+    pendingGameType = "";
+    toast("Message sent.");
+    await fetchMessages();
+  } catch (error) {
+    toast(error.message);
+  }
+});
+document.querySelectorAll("[data-game]").forEach((button) => {
+  button.addEventListener("click", () => {
+    pendingGameType = button.dataset.game;
+    $("#gameAttachLabel").textContent = getGameTitle(pendingGameType) || "None";
+    if (pendingGameType && !$("#composeSubject").value.trim()) $("#composeSubject").value = `${getGameTitle(pendingGameType)} challenge`;
   });
-  activeThread = threads[0];
-  event.currentTarget.reset();
-  $("#composeDialog").close();
-  render();
-  toast("Message sent and thread created.");
+});
+$("#sendReplyButton").addEventListener("click", async () => {
+  if (!activeThread || !$("#replyBox").value.trim()) return;
+  try {
+    await sendRemoteMessage(activeThread.people, activeThread.title, $("#replyBox").value.trim());
+    $("#replyBox").value = "";
+    toast("Reply sent.");
+    await fetchMessages();
+  } catch (error) {
+    toast(error.message);
+  }
+});
+$("#refreshButton").addEventListener("click", fetchMessages);
+$("#threadAiButton").addEventListener("click", () => openSettingsDialog($("#aiDialog")));
+function getBasicAiReply(prompt) {
+  const text = prompt.toLowerCase();
+  if (text.includes("rewrite")) return "Paste the message you want rewritten and tell me whether you want it warmer, shorter, or more direct.";
+  if (text.includes("summar")) return "Open the conversation you want summarized and ask me for the key points and next steps.";
+  if (text.includes("reply") || text.includes("say")) return "Paste the message you are answering and I will draft a natural reply.";
+  return "I can help write replies, rewrite messages, summarize conversations, and brainstorm ideas. Tell me what you are working on.";
+}
+
+$("#aiForm").addEventListener("submit", async (event) => {
+  if (event.submitter?.value === "cancel") return;
+  event.preventDefault();
+  if (!event.currentTarget.reportValidity()) return;
+  try {
+    const prompt = $("#aiPrompt").value.trim();
+    await sendRemoteMessage(AI_HANDLE, "ThreadAI", prompt);
+    let reply = "";
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/threadmail-ai`, {
+        method: "POST",
+        headers: getHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ handle: settings.profile.handle, subject: "ThreadAI", message: prompt, recent: [] }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      reply = response.ok ? String(payload.reply || "") : "";
+    } catch {
+      reply = "";
+    }
+    await sendRemoteMessage(settings.profile.handle, "ThreadAI", reply || getBasicAiReply(prompt), { sender: AI_HANDLE });
+    event.currentTarget.reset();
+    $("#aiDialog").close();
+    toast("Sent to ThreadAI.");
+    await fetchMessages();
+  } catch (error) {
+    toast(error.message);
+  }
+});
+$("#unlockForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (encodePasscode($("#unlockCode").value) !== settings.passcodeHash) {
+    $("#lockStatus").textContent = "Wrong passcode.";
+    return;
+  }
+  sessionStorage.setItem("threadlineUnlocked", "1");
+  $("#unlockCode").value = "";
+  saveSettings();
+  toast("Threadline unlocked.");
 });
 $("#toneButton").addEventListener("click", () => {
   $("#replyBox").value = "Thanks for the update. I will follow up with the next step shortly.";
@@ -345,3 +591,5 @@ document.querySelectorAll(".nav-list button, .folder, .saved-search, .chip").for
 });
 
 render();
+fetchMessages();
+window.setInterval(fetchMessages, 15000);
