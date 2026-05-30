@@ -233,7 +233,8 @@
           <h2>New message</h2>
           <button class="icon-button" type="button" data-close-dialog onclick="this.closest('dialog').close()" title="Close compose"><i data-lucide="x"></i></button>
         </div>
-        <label>To handle<input id="composeTo" required placeholder="example: ari" /></label>
+        <label>To handles<input id="composeTo" required placeholder="ari, sam, jordan" /></label>
+        <label>Group name <span class="optional-label">Optional when messaging several people</span><input id="composeGroupName" placeholder="Weekend plans" /></label>
         <label>Subject<input id="composeSubject" required placeholder="Subject" /></label>
         <label>Message<textarea id="composeMessage" required placeholder="Write your message"></textarea></label>
         <section class="game-attach-panel" aria-label="Attach a game">

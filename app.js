@@ -7,6 +7,7 @@ const GAME_PREFIX = "THREADLINE_GAME::";
 const VOICE_NOTE_PREFIX = "THREADMAIL_VOICE_NOTE::";
 const PHOTO_PREFIX = "THREADMAIL_PHOTO::";
 const FILE_PREFIX = "THREADLINE_FILE::";
+const GROUP_PREFIX = "THREADLINE_GROUP::";
 const AI_HANDLE = "threadai";
 let threads = [];
 let gameRows = [];
@@ -93,6 +94,35 @@ function parsePrefixedJson(body, prefix) {
   }
 }
 
+function parseRecipients(value) {
+  return [...new Set(String(value || "").split(",").map(normalizeHandle).filter(Boolean))];
+}
+
+function createGroupId(members, name) {
+  const seed = `${[...members].sort().join("_")}|${String(name || "").trim().toLowerCase()}`;
+  let hash = 0;
+  for (const character of seed) hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0;
+  return `group_${Math.abs(hash)}`;
+}
+
+function createMessageId() {
+  return `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function packGroupBody(body, group) {
+  return `${GROUP_PREFIX}${JSON.stringify(group)}\n${body}`;
+}
+
+function unpackGroupBody(body) {
+  if (!String(body || "").startsWith(GROUP_PREFIX)) return { body: String(body || ""), group: null };
+  const [meta, ...rest] = String(body).slice(GROUP_PREFIX.length).split("\n");
+  try {
+    return { body: rest.join("\n"), group: JSON.parse(meta) };
+  } catch {
+    return { body: String(body || ""), group: null };
+  }
+}
+
 async function createGame(sender, recipient, type) {
   const board = type === "connect_four"
     ? Array(42).fill("")
@@ -128,6 +158,25 @@ async function sendRemoteMessage(recipient, subject, body, options = {}) {
   if (!response.ok) throw new Error("Message could not be sent. Check your connection and try again.");
 }
 
+async function sendConversationMessage(recipients, subject, body, options = {}) {
+  const sender = normalizeHandle(options.sender || settings.profile?.handle || "");
+  const handles = [...new Set((Array.isArray(recipients) ? recipients : parseRecipients(recipients)).map(normalizeHandle).filter((handle) => handle && handle !== sender))];
+  if (!handles.length) throw new Error("Add at least one other person's handle.");
+  if (handles.some((handle) => !isValidHandle(handle))) throw new Error("Use valid 3-24 character handles separated by commas.");
+  if (handles.length === 1 && !options.group) return sendRemoteMessage(handles[0], subject, body, options);
+  if (options.gameType) throw new Error("Games are currently for two-person conversations.");
+  const members = [...new Set([sender, ...(options.group?.members || []), ...handles])].sort();
+  const group = {
+    id: options.group?.id || createGroupId(members, options.groupName || subject),
+    name: String(options.group?.name || options.groupName || subject || "Group chat").trim().slice(0, 60),
+    members,
+    messageId: createMessageId(),
+  };
+  await Promise.all(members.filter((handle) => handle !== sender).map((handle) => (
+    sendRemoteMessage(handle, subject, packGroupBody(body, group), { sender, gameId: options.gameId })
+  )));
+}
+
 async function fetchMessages() {
   const handle = normalizeHandle(settings.profile?.handle || "");
   if (!isValidHandle(handle) || (settings.passcodeHash && !appUnlocked)) return;
@@ -138,24 +187,33 @@ async function fetchMessages() {
     const rows = await response.json();
     const groups = new Map();
     rows.forEach((row) => {
+      const grouped = unpackGroupBody(row.body);
       const other = row.sender_handle === handle ? row.recipient_handle : row.sender_handle;
-      const key = `${other}|${row.subject}`;
+      const key = grouped.group?.id ? `group:${grouped.group.id}` : `${other}|${row.subject}`;
       if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(row);
+      groups.get(key).push({ ...row, group: grouped.group, display_body: grouped.body });
     });
     threads = [...groups.entries()].map(([key, rows]) => {
       rows.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      const [other, title] = key.split("|");
+      const group = rows.find((row) => row.group)?.group || null;
+      const visibleRows = group
+        ? rows.filter((row, index, all) => all.findIndex((item) => item.group?.messageId === row.group?.messageId) === index)
+        : rows;
+      const [other, directTitle] = key.split("|");
+      const people = group ? group.members.filter((member) => member !== handle).join(", ") : other;
+      const title = group?.name || directTitle;
       const latest = rows[rows.length - 1];
-      const decoded = unpackBody(latest.body);
+      const decoded = unpackBody(latest.display_body ?? latest.body);
       const game = latest.game_id ? gameRows.find((entry) => entry.id === latest.game_id) : null;
       const unread = rows.filter((row) => row.recipient_handle === handle && !row.read_at);
       return {
         id: key,
         title,
-        people: other,
+        people,
+        recipients: group ? group.members.filter((member) => member !== handle) : [other],
+        group,
         status: "Open",
-        labels: game || decoded.game ? `Game: ${getGameTitle(game?.type || decoded.game)}` : "Live",
+        labels: group ? `${group.members.length} people` : game || decoded.game ? `Game: ${getGameTitle(game?.type || decoded.game)}` : "Live",
         urgency: "Normal",
         receipt: "Synced",
         summary: game || decoded.game ? `${other} shared a ${getGameTitle(game?.type || decoded.game)} game.` : decoded.body.slice(0, 120),
@@ -164,8 +222,8 @@ async function fetchMessages() {
         rows,
         gameId: [...rows].reverse().find((row) => row.game_id)?.game_id || "",
         unreadCount: unread.length,
-        messages: rows.map((row) => {
-          const unpacked = unpackBody(row.body);
+        messages: visibleRows.map((row) => {
+          const unpacked = unpackBody(row.display_body ?? row.body);
           const game = unpacked.game ? `\n\nGame invite: ${getGameTitle(unpacked.game)}` : "";
           return {
             sender: row.sender_handle === handle ? "You" : row.sender_handle,
@@ -221,7 +279,8 @@ function notifyNewUnread(rows, handle) {
   }
   if (!fresh.length || !settings.notifications?.device || !("Notification" in window) || Notification.permission !== "granted") return;
   const row = fresh[0];
-  new Notification(`New Threadline message from ${row.sender_handle}`, { body: row.subject || row.body.slice(0, 80), icon: "threadline-icon-192.png" });
+  const notificationBody = unpackGroupBody(row.body).body;
+  new Notification(`New Threadline message from ${row.sender_handle}`, { body: row.subject || notificationBody.slice(0, 80), icon: "threadline-icon-192.png" });
 }
 
 function toast(message) {
@@ -391,7 +450,7 @@ function renderActions() {
 
 function activeTypingHandle() {
   if (!activeThread) return "";
-  return typingRows.find((row) => row.sender_handle === activeThread.people && row.subject_key === activeThread.title.toLowerCase().slice(0, 120))?.sender_handle || "";
+  return typingRows.find((row) => activeThread.recipients.includes(row.sender_handle) && row.subject_key === activeThread.title.toLowerCase().slice(0, 120))?.sender_handle || "";
 }
 
 function renderSidebarData() {
@@ -403,7 +462,7 @@ function renderSidebarData() {
       }).join("")
     : `<span class="sidebar-empty">No active games yet</span>`;
   $("#gameLobbyCount").textContent = String(gameRows.length);
-  const contacts = [...new Set(threads.map((thread) => thread.people))].filter(Boolean);
+  const contacts = [...new Set(threads.flatMap((thread) => thread.recipients || [thread.people]))].filter(Boolean);
   $("#contactList").innerHTML = contacts.length
     ? contacts.map((contact) => `<button data-contact="${escapeHtml(contact)}"><i data-lucide="user-round"></i> ${escapeHtml(contact)}</button>`).join("")
     : `<span class="sidebar-empty">Contacts appear after you message someone</span>`;
@@ -554,7 +613,7 @@ function renderReader() {
     return;
   }
   $("#threadTitle").textContent = activeThread.title;
-  $("#threadSubtitle").textContent = `${activeThread.people} · ${activeThread.messages.length} message${activeThread.messages.length === 1 ? "" : "s"} · read receipt ${activeThread.receipt}`;
+  $("#threadSubtitle").textContent = `${activeThread.group ? `Group with ${activeThread.people}` : activeThread.people} · ${activeThread.messages.length} message${activeThread.messages.length === 1 ? "" : "s"} · read receipt ${activeThread.receipt}`;
   $("#threadLabels").textContent = activeThread.labels;
   $("#detailPresence").textContent = activeTypingHandle() ? `${activeTypingHandle()} is typing...` : "Live conversation";
   $("#summaryText").textContent = activeThread.summary;
@@ -793,20 +852,31 @@ function openCompose() {
   $("#gameAttachLabel").textContent = "None";
   $("#composeDialog").showModal();
   $("#composeTo").focus();
+  updateComposeGroupState();
+}
+
+function updateComposeGroupState() {
+  const isGroup = parseRecipients($("#composeTo").value).length > 1;
+  document.querySelectorAll("[data-game]").forEach((button) => {
+    button.disabled = isGroup && Boolean(button.dataset.game);
+  });
+  if (isGroup && pendingGameType) pendingGameType = "";
+  $("#gameAttachLabel").textContent = isGroup ? "Two-person chats only" : getGameTitle(pendingGameType) || "None";
 }
 
 $("#composeButton").addEventListener("click", openCompose);
 $("#emptyComposeButton").addEventListener("click", openCompose);
+$("#composeTo").addEventListener("input", updateComposeGroupState);
 $("#composeForm").addEventListener("submit", async (event) => {
   if (event.submitter?.value === "cancel") return;
   event.preventDefault();
   if (!event.currentTarget.reportValidity()) return;
-  const recipient = normalizeHandle($("#composeTo").value);
+  const recipients = parseRecipients($("#composeTo").value);
   const subject = $("#composeSubject").value.trim();
   const message = $("#composeMessage").value.trim();
   const body = pendingGameType ? `${GAME_PREFIX}${pendingGameType}\n${message}\n\n${getGameRules(pendingGameType)}` : message;
   try {
-    await sendRemoteMessage(recipient, subject, body, { gameType: pendingGameType });
+    await sendConversationMessage(recipients, subject, body, { gameType: pendingGameType, groupName: $("#composeGroupName").value.trim() });
     event.currentTarget.reset();
     $("#composeDialog").close();
     pendingGameType = "";
@@ -826,7 +896,7 @@ document.querySelectorAll("[data-game]").forEach((button) => {
 $("#sendReplyButton").addEventListener("click", async () => {
   if (!activeThread || !$("#replyBox").value.trim()) return;
   try {
-    await sendRemoteMessage(activeThread.people, activeThread.title, $("#replyBox").value.trim());
+    await sendConversationMessage(activeThread.recipients, activeThread.title, $("#replyBox").value.trim(), { group: activeThread.group });
     $("#replyBox").value = "";
     toast("Reply sent.");
     await fetchMessages();
@@ -953,19 +1023,19 @@ document.querySelectorAll(".nav-list button, .folder, .saved-search, .chip").for
 });
 
 async function sendTypingState(isTyping) {
-  if (!activeThread || !isValidHandle(settings.profile?.handle || "") || !isValidHandle(activeThread.people)) return;
+  if (!activeThread || !isValidHandle(settings.profile?.handle || "")) return;
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/${TYPING_TABLE}?on_conflict=sender_handle,recipient_handle,subject_key`, {
+    await Promise.all(activeThread.recipients.map((recipient) => fetch(`${SUPABASE_URL}/rest/v1/${TYPING_TABLE}?on_conflict=sender_handle,recipient_handle,subject_key`, {
       method: "POST",
       headers: getHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }),
       body: JSON.stringify([{
         sender_handle: settings.profile.handle,
-        recipient_handle: activeThread.people,
+        recipient_handle: recipient,
         subject_key: activeThread.title.toLowerCase().slice(0, 120),
         is_typing: Boolean(isTyping),
         updated_at: new Date().toISOString(),
       }]),
-    });
+    })));
   } catch {
     // Typing indicators are optional.
   }
@@ -994,7 +1064,7 @@ function readFileAsDataUrl(file, maxBytes) {
 async function sendAttachment(prefix, payload, label) {
   if (!activeThread) return toast("Open a conversation first.");
   try {
-    await sendRemoteMessage(activeThread.people, activeThread.title, `${prefix}${JSON.stringify(payload)}\n${label}`);
+    await sendConversationMessage(activeThread.recipients, activeThread.title, `${prefix}${JSON.stringify(payload)}\n${label}`, { group: activeThread.group });
     toast(`${label} sent.`);
     await fetchMessages();
   } catch (error) {
