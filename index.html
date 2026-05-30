@@ -10,24 +10,271 @@
   <body>
     <div class="app-shell">
       <aside class="sidebar" aria-label="Threadline navigation">
-        <div class="brand"><div class="brand-mark">T</div><div><h1>Threadline</h1><p>AI inbox control room</p></div></div>
-        <div class="compose-box"><button class="primary-action" id="composeButton"><i data-lucide="square-pen"></i> Compose</button><button class="icon-button" title="Undo send" id="undoSendButton"><i data-lucide="undo-2"></i></button></div>
-        <nav class="nav-list"><button class="active"><i data-lucide="inbox"></i> Priority Inbox <span id="inboxCount">0</span></button><button><i data-lucide="clock-3"></i> Snoozed <span>0</span></button><button><i data-lucide="timer-reset"></i> Waiting On <span>0</span></button><button><i data-lucide="check-circle-2"></i> Resolved <span>0</span></button><button><i data-lucide="users"></i> Shared Inbox <span>0</span></button></nav>
-        <section class="side-section"><div class="section-title">Smart Folders</div><p class="sidebar-empty">No smart folders yet</p></section>
-        <section class="side-section"><div class="section-title">Saved Searches</div><p class="sidebar-empty">No saved searches yet</p></section>
-        <div class="sidebar-footer"><label class="toggle-row"><span>Dark mode</span><input type="checkbox" id="themeToggle" /></label><label class="toggle-row"><span>Custom alerts</span><input type="checkbox" checked /></label></div>
+        <div class="brand">
+          <div class="brand-mark">T</div>
+          <div>
+            <h1>Threadline</h1>
+            <p>AI inbox control room</p>
+          </div>
+        </div>
+
+        <div class="compose-box">
+          <button class="primary-action" id="composeButton">
+            <i data-lucide="square-pen"></i>
+            Compose
+          </button>
+          <button class="icon-button" title="Undo send" id="undoSendButton">
+            <i data-lucide="undo-2"></i>
+          </button>
+        </div>
+
+        <nav class="nav-list">
+          <button class="active"><i data-lucide="inbox"></i> Priority Inbox <span id="inboxCount">0</span></button>
+          <button><i data-lucide="clock-3"></i> Snoozed <span>0</span></button>
+          <button><i data-lucide="timer-reset"></i> Waiting On <span>0</span></button>
+          <button><i data-lucide="check-circle-2"></i> Resolved <span>0</span></button>
+          <button><i data-lucide="users"></i> Shared Inbox <span>0</span></button>
+        </nav>
+
+        <section class="side-section">
+          <div class="section-title">Smart Folders</div>
+          <p class="sidebar-empty">No smart folders yet</p>
+        </section>
+
+        <section class="side-section">
+          <div class="section-title">Saved Searches</div>
+          <p class="sidebar-empty">No saved searches yet</p>
+        </section>
+
+        <div class="sidebar-footer">
+          <label class="toggle-row">
+            <span>Dark mode</span>
+            <input type="checkbox" id="themeToggle" />
+          </label>
+          <label class="toggle-row">
+            <span>Custom alerts</span>
+            <input type="checkbox" checked />
+          </label>
+        </div>
       </aside>
+
       <main class="workspace">
-        <header class="topbar"><div class="search-wrap"><i data-lucide="search"></i><input id="semanticSearch" type="search" placeholder="Semantic search threads, decisions, files, people" /></div><div class="top-actions"><button class="icon-button" title="Keyboard shortcuts" id="shortcutButton"><i data-lucide="keyboard"></i></button><button class="icon-button" title="Notification rules"><i data-lucide="bell-ring"></i></button><button class="profile-button" title="Profile"><i data-lucide="user"></i></button></div></header>
-        <section class="inbox-zero-band"><div><h2>Inbox Zero Dashboard</h2><p id="dashboardSummary">No inbox activity yet</p></div><div class="score-grid"><div><strong id="readHealth">--</strong><span>Read health</span></div><div><strong>--</strong><span>Avg reply</span></div><div><strong>0</strong><span>Tasks found</span></div></div></section>
+        <header class="topbar">
+          <div class="search-wrap">
+            <i data-lucide="search"></i>
+            <input id="semanticSearch" type="search" placeholder="Semantic search threads, decisions, files, people" />
+          </div>
+          <div class="top-actions">
+            <button class="icon-button" title="Keyboard shortcuts" id="shortcutButton"><i data-lucide="keyboard"></i></button>
+            <button class="icon-button" title="Notification rules" id="notificationButton"><i data-lucide="bell-ring"></i></button>
+            <button class="profile-button" title="Profile" id="profileButton"><span id="profileMark"><i data-lucide="user"></i></span></button>
+          </div>
+        </header>
+
+        <section class="inbox-zero-band">
+          <div>
+            <h2>Inbox Zero Dashboard</h2>
+            <p id="dashboardSummary">No inbox activity yet</p>
+          </div>
+          <div class="score-grid">
+            <div><strong id="readHealth">--</strong><span>Read health</span></div>
+            <div><strong>--</strong><span>Avg reply</span></div>
+            <div><strong>0</strong><span>Tasks found</span></div>
+          </div>
+        </section>
+
         <div class="content-grid">
-          <section class="thread-list-panel" aria-label="Thread list"><div class="panel-header"><div><h2>Priority Threads</h2><p>Auto-ranked by urgency, stakeholders, and action debt</p></div><button class="icon-button" title="Filters"><i data-lucide="sliders-horizontal"></i></button></div><div class="filter-row"><button class="chip active">All</button><button class="chip">Sender</button><button class="chip">Project</button><button class="chip">Deadline</button><button class="chip">Status</button></div><div id="threadList" class="thread-list"></div></section>
-          <section class="reader-panel" aria-label="Thread reader"><div class="reader-empty" id="readerEmpty"><i data-lucide="mail-plus"></i><h2>No conversations yet</h2><p>Connect an inbox or compose a message to start your first thread.</p><button class="primary-action small" id="emptyComposeButton"><i data-lucide="square-pen"></i> Compose</button></div><div class="thread-toolbar"><div class="thread-title-block"><div class="status-line"><span id="threadStatus" class="status-pill open">Open</span><span id="threadLabels"></span></div><h2 id="threadTitle"></h2><p id="threadSubtitle"></p></div><div class="reader-actions"><button class="icon-button" title="Pin important message" id="pinButton"><i data-lucide="pin"></i></button><button class="icon-button" title="Snooze thread" id="snoozeButton"><i data-lucide="alarm-clock"></i></button><button class="icon-button" title="Send later"><i data-lucide="send"></i></button><button class="primary-action small" id="approvalButton"><i data-lucide="stamp"></i> Approval</button></div></div><div class="ai-summary"><div><span class="eyebrow">AI Thread Summary</span><p id="summaryText"></p></div><button class="ghost-button" id="changedButton">What changed?</button></div><div class="quick-actions"><button data-action="summary"><i data-lucide="sparkles"></i> Summarize</button><button data-action="actions"><i data-lucide="list-checks"></i> Action Items</button><button data-action="questions"><i data-lucide="circle-help"></i> Questions</button><button data-action="tasklist"><i data-lucide="clipboard-check"></i> Make Tasks</button><button data-action="rewrite"><i data-lucide="wand-sparkles"></i> Rewrite</button><button data-action="labels"><i data-lucide="tags"></i> Auto-label</button></div><div class="topic-tools"><button class="ghost-button" id="splitButton"><i data-lucide="split"></i> Split into topics</button><button class="ghost-button" id="mergeButton"><i data-lucide="merge"></i> Merge related</button><button class="ghost-button" id="quoteButton"><i data-lucide="eraser"></i> Clean quotes</button></div><div id="messageStack" class="message-stack"></div><div class="reply-dock"><div class="collision-alert" id="collisionAlert" hidden><i data-lucide="triangle-alert"></i> A teammate is drafting a reply in this thread.</div><textarea id="replyBox" placeholder="Draft a reply, use a template, or ask AI to match your tone"></textarea><div class="reply-actions"><select id="templateSelect" aria-label="Saved reply templates"><option value="">Template</option><option>Confirm receipt</option><option>Ask for owner</option><option>Concise follow-up</option></select><button class="ghost-button" id="toneButton">Warmer</button><button class="ghost-button">Firmer</button><button class="primary-action small"><i data-lucide="send-horizontal"></i> Send Later</button></div></div></section>
-          <aside class="inspector-panel" aria-label="Thread inspector"><section><div class="panel-header compact"><h2>Workflow</h2><button class="icon-button" title="Assign thread"><i data-lucide="user-plus"></i></button></div><div class="workflow-grid"><label>Owner<select><option>Unassigned</option></select></label><label>Status<select id="statusSelect"><option>Open</option><option>Waiting</option><option>Resolved</option></select></label><label>Follow-up<input type="date" /></label><label>Priority<select><option>High</option><option>Normal</option><option>Low</option></select></label></div></section><section><h2>Action Items</h2><div id="actionItems" class="check-list"></div></section><section><h2>Internal Notes</h2><div class="note-list"><p>No internal notes yet.</p></div><input class="note-input" placeholder="Mention teammates privately" /></section><section><h2>Contact Timeline</h2><ol class="timeline"><li>No contact activity yet.</li></ol></section><section><h2>Attachments</h2><div class="attachment-grid"><p>No attachments yet.</p></div></section></aside>
+          <section class="thread-list-panel" aria-label="Thread list">
+            <div class="panel-header">
+              <div>
+                <h2>Priority Threads</h2>
+                <p>Auto-ranked by urgency, stakeholders, and action debt</p>
+              </div>
+              <button class="icon-button" title="Filters"><i data-lucide="sliders-horizontal"></i></button>
+            </div>
+
+            <div class="filter-row">
+              <button class="chip active">All</button>
+              <button class="chip">Sender</button>
+              <button class="chip">Project</button>
+              <button class="chip">Deadline</button>
+              <button class="chip">Status</button>
+            </div>
+
+            <div id="threadList" class="thread-list"></div>
+          </section>
+
+          <section class="reader-panel" aria-label="Thread reader">
+            <div class="reader-empty" id="readerEmpty">
+              <i data-lucide="mail-plus"></i>
+              <h2>No conversations yet</h2>
+              <p id="emptyReaderText">Connect an inbox or compose a message to start your first thread.</p>
+              <button class="ghost-button" id="connectInboxButton"><i data-lucide="plug-zap"></i> Connect inbox</button>
+              <button class="primary-action small" id="emptyComposeButton"><i data-lucide="square-pen"></i> Compose</button>
+            </div>
+            <div class="thread-toolbar">
+              <div class="thread-title-block">
+                <div class="status-line">
+                  <span id="threadStatus" class="status-pill open">Open</span>
+                  <span id="threadLabels"></span>
+                </div>
+                <h2 id="threadTitle"></h2>
+                <p id="threadSubtitle"></p>
+              </div>
+              <div class="reader-actions">
+                <button class="icon-button" title="Pin important message" id="pinButton"><i data-lucide="pin"></i></button>
+                <button class="icon-button" title="Snooze thread" id="snoozeButton"><i data-lucide="alarm-clock"></i></button>
+                <button class="icon-button" title="Send later"><i data-lucide="send"></i></button>
+                <button class="primary-action small" id="approvalButton"><i data-lucide="stamp"></i> Approval</button>
+              </div>
+            </div>
+
+            <div class="ai-summary">
+              <div>
+                <span class="eyebrow">AI Thread Summary</span>
+                <p id="summaryText"></p>
+              </div>
+              <button class="ghost-button" id="changedButton">What changed?</button>
+            </div>
+
+            <div class="quick-actions">
+              <button data-action="summary"><i data-lucide="sparkles"></i> Summarize</button>
+              <button data-action="actions"><i data-lucide="list-checks"></i> Action Items</button>
+              <button data-action="questions"><i data-lucide="circle-help"></i> Questions</button>
+              <button data-action="tasklist"><i data-lucide="clipboard-check"></i> Make Tasks</button>
+              <button data-action="rewrite"><i data-lucide="wand-sparkles"></i> Rewrite</button>
+              <button data-action="labels"><i data-lucide="tags"></i> Auto-label</button>
+            </div>
+
+            <div class="topic-tools">
+              <button class="ghost-button" id="splitButton"><i data-lucide="split"></i> Split into topics</button>
+              <button class="ghost-button" id="mergeButton"><i data-lucide="merge"></i> Merge related</button>
+              <button class="ghost-button" id="quoteButton"><i data-lucide="eraser"></i> Clean quotes</button>
+            </div>
+
+            <div id="messageStack" class="message-stack"></div>
+
+            <div class="reply-dock">
+              <div class="collision-alert" id="collisionAlert" hidden><i data-lucide="triangle-alert"></i> A teammate is drafting a reply in this thread.</div>
+              <textarea id="replyBox" placeholder="Draft a reply, use a template, or ask AI to match your tone"></textarea>
+              <div class="reply-actions">
+                <select id="templateSelect" aria-label="Saved reply templates">
+                  <option value="">Template</option>
+                  <option>Confirm receipt</option>
+                  <option>Ask for owner</option>
+                  <option>Concise follow-up</option>
+                </select>
+                <button class="ghost-button" id="toneButton">Warmer</button>
+                <button class="ghost-button">Firmer</button>
+                <button class="primary-action small"><i data-lucide="send-horizontal"></i> Send Later</button>
+              </div>
+            </div>
+          </section>
+
+          <aside class="inspector-panel" aria-label="Thread inspector">
+            <section>
+              <div class="panel-header compact">
+                <h2>Workflow</h2>
+                <button class="icon-button" title="Assign thread"><i data-lucide="user-plus"></i></button>
+              </div>
+              <div class="workflow-grid">
+                <label>Owner<select><option>Unassigned</option></select></label>
+                <label>Status<select id="statusSelect"><option>Open</option><option>Waiting</option><option>Resolved</option></select></label>
+                <label>Follow-up<input type="date" /></label>
+                <label>Priority<select><option>High</option><option>Normal</option><option>Low</option></select></label>
+              </div>
+            </section>
+
+            <section>
+              <h2>Action Items</h2>
+              <div id="actionItems" class="check-list"></div>
+            </section>
+
+            <section>
+              <h2>Internal Notes</h2>
+              <div class="note-list"><p>No internal notes yet.</p></div>
+              <input class="note-input" placeholder="Mention teammates privately" />
+            </section>
+
+            <section>
+              <h2>Contact Timeline</h2>
+              <ol class="timeline"><li>No contact activity yet.</li></ol>
+            </section>
+
+            <section>
+              <h2>Attachments</h2>
+              <div class="attachment-grid"><p>No attachments yet.</p></div>
+            </section>
+          </aside>
         </div>
       </main>
     </div>
-    <dialog class="compose-dialog" id="composeDialog"><form method="dialog" id="composeForm"><div class="compose-dialog-header"><h2>New message</h2><button class="icon-button" value="cancel" title="Close compose"><i data-lucide="x"></i></button></div><label>To<input id="composeTo" type="email" required placeholder="name@example.com" /></label><label>Subject<input id="composeSubject" required placeholder="Subject" /></label><label>Message<textarea id="composeMessage" required placeholder="Write your message"></textarea></label><div class="compose-dialog-actions"><button class="ghost-button" value="cancel">Cancel</button><button class="primary-action small" id="sendMessageButton" value="default"><i data-lucide="send-horizontal"></i> Send</button></div></form></dialog>
-    <div class="toast" id="toast" role="status"></div><script src="app.js"></script>
+
+    <dialog class="compose-dialog" id="composeDialog">
+      <form method="dialog" id="composeForm">
+        <div class="compose-dialog-header">
+          <h2>New message</h2>
+          <button class="icon-button" value="cancel" title="Close compose"><i data-lucide="x"></i></button>
+        </div>
+        <label>To<input id="composeTo" type="email" required placeholder="name@example.com" /></label>
+        <label>Subject<input id="composeSubject" required placeholder="Subject" /></label>
+        <label>Message<textarea id="composeMessage" required placeholder="Write your message"></textarea></label>
+        <div class="compose-dialog-actions">
+          <button class="ghost-button" value="cancel">Cancel</button>
+          <button class="primary-action small" id="sendMessageButton" value="default"><i data-lucide="send-horizontal"></i> Send</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="compose-dialog" id="profileDialog">
+      <form method="dialog" id="profileForm">
+        <div class="compose-dialog-header">
+          <h2>Profile setup</h2>
+          <button class="icon-button" value="cancel" title="Close profile"><i data-lucide="x"></i></button>
+        </div>
+        <label>Name<input id="profileName" required placeholder="Your name" /></label>
+        <label>Email<input id="profileEmail" type="email" required placeholder="you@example.com" /></label>
+        <label>Workspace<input id="profileWorkspace" placeholder="Workspace name" /></label>
+        <div class="compose-dialog-actions">
+          <button class="ghost-button" value="cancel">Cancel</button>
+          <button class="primary-action small" value="default"><i data-lucide="save"></i> Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="compose-dialog" id="notificationDialog">
+      <form method="dialog" id="notificationForm">
+        <div class="compose-dialog-header">
+          <h2>Notification rules</h2>
+          <button class="icon-button" value="cancel" title="Close notifications"><i data-lucide="x"></i></button>
+        </div>
+        <label class="dialog-check"><input id="notifyReplies" type="checkbox" /> New replies</label>
+        <label class="dialog-check"><input id="notifyMentions" type="checkbox" /> Mentions and assignments</label>
+        <label class="dialog-check"><input id="notifyFollowups" type="checkbox" /> Follow-up reminders</label>
+        <div class="compose-dialog-actions">
+          <button class="ghost-button" value="cancel">Cancel</button>
+          <button class="primary-action small" value="default"><i data-lucide="save"></i> Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="compose-dialog" id="inboxDialog">
+      <form method="dialog" id="inboxForm">
+        <div class="compose-dialog-header">
+          <h2>Connect inbox</h2>
+          <button class="icon-button" value="cancel" title="Close inbox setup"><i data-lucide="x"></i></button>
+        </div>
+        <label>Email address<input id="inboxEmail" type="email" required placeholder="inbox@example.com" /></label>
+        <label>Provider<select id="inboxProvider"><option>Gmail</option><option>Outlook</option><option>Other</option></select></label>
+        <p class="dialog-help">This demo stores the connection label locally. Live email sync needs a backend and provider authorization.</p>
+        <div class="compose-dialog-actions">
+          <button class="ghost-button" value="cancel">Cancel</button>
+          <button class="primary-action small" value="default"><i data-lucide="plug-zap"></i> Connect</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status"></div>
+    <script src="app.js"></script>
   </body>
 </html>

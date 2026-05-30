@@ -4,6 +4,7 @@ let activeThread = null;
 let quotesCleaned = false;
 let topicsSplit = false;
 let showAllMessages = false;
+let settings = JSON.parse(localStorage.getItem("threadlineSettings") || "{}");
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -12,6 +13,31 @@ function toast(message) {
   el.textContent = message;
   el.classList.add("show");
   window.setTimeout(() => el.classList.remove("show"), 2200);
+}
+
+function saveSettings() {
+  localStorage.setItem("threadlineSettings", JSON.stringify(settings));
+  renderSettings();
+}
+
+function renderSettings() {
+  const initials = settings.profile?.name
+    ?.split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join("");
+  $("#profileMark").textContent = initials || "";
+  if (!initials) $("#profileMark").innerHTML = '<i data-lucide="user"></i>';
+  $("#emptyReaderText").textContent = settings.inbox
+    ? `${settings.inbox.provider} inbox ${settings.inbox.email} is labeled as connected. Compose a message to start your first thread.`
+    : "Connect an inbox or compose a message to start your first thread.";
+  $("#connectInboxButton").innerHTML = settings.inbox
+    ? '<i data-lucide="plug-zap"></i> Inbox connected'
+    : '<i data-lucide="plug-zap"></i> Connect inbox';
+  $("#themeToggle").checked = Boolean(settings.darkMode);
+  document.body.classList.toggle("dark", Boolean(settings.darkMode));
+  if (window.lucide) window.lucide.createIcons();
 }
 
 function renderThreads() {
@@ -140,6 +166,7 @@ function render() {
     ? `${threads.length} active conversation${threads.length === 1 ? "" : "s"}`
     : "No inbox activity yet";
   $("#readHealth").textContent = threads.length ? "100%" : "--";
+  renderSettings();
   if (window.lucide) window.lucide.createIcons();
 }
 
@@ -161,7 +188,8 @@ document.addEventListener("click", (event) => {
 });
 
 $("#themeToggle").addEventListener("change", (event) => {
-  document.body.classList.toggle("dark", event.target.checked);
+  settings.darkMode = event.target.checked;
+  saveSettings();
 });
 
 $("#changedButton").addEventListener("click", () => activeThread && toast(activeThread.changed));
@@ -184,8 +212,67 @@ $("#snoozeButton").addEventListener("click", () => toast("Thread snoozed until F
 $("#approvalButton").addEventListener("click", () => toast("Approval request created."));
 $("#undoSendButton").addEventListener("click", () => toast("Last send canceled. Draft restored."));
 $("#shortcutButton").addEventListener("click", () => toast("Shortcuts: C compose, E resolve, S snooze, / search."));
-document.querySelector('[title="Notification rules"]').addEventListener("click", () => toast("No notification rules configured yet."));
-document.querySelector('[title="Profile"]').addEventListener("click", () => toast("Profile setup is not connected yet."));
+function openSettingsDialog(dialog) {
+  dialog.showModal();
+  dialog.querySelector("input")?.focus();
+}
+
+$("#profileButton").addEventListener("click", () => {
+  $("#profileName").value = settings.profile?.name || "";
+  $("#profileEmail").value = settings.profile?.email || "";
+  $("#profileWorkspace").value = settings.profile?.workspace || "";
+  openSettingsDialog($("#profileDialog"));
+});
+$("#profileForm").addEventListener("submit", (event) => {
+  if (event.submitter?.value === "cancel") return;
+  event.preventDefault();
+  if (!event.currentTarget.reportValidity()) return;
+  settings.profile = {
+    name: $("#profileName").value.trim(),
+    email: $("#profileEmail").value.trim(),
+    workspace: $("#profileWorkspace").value.trim(),
+  };
+  saveSettings();
+  $("#profileDialog").close();
+  toast("Profile saved.");
+});
+
+$("#notificationButton").addEventListener("click", () => {
+  $("#notifyReplies").checked = Boolean(settings.notifications?.replies);
+  $("#notifyMentions").checked = Boolean(settings.notifications?.mentions);
+  $("#notifyFollowups").checked = Boolean(settings.notifications?.followups);
+  openSettingsDialog($("#notificationDialog"));
+});
+$("#notificationForm").addEventListener("submit", (event) => {
+  if (event.submitter?.value === "cancel") return;
+  event.preventDefault();
+  settings.notifications = {
+    replies: $("#notifyReplies").checked,
+    mentions: $("#notifyMentions").checked,
+    followups: $("#notifyFollowups").checked,
+  };
+  saveSettings();
+  $("#notificationDialog").close();
+  toast("Notification rules saved.");
+});
+
+$("#connectInboxButton").addEventListener("click", () => {
+  $("#inboxEmail").value = settings.inbox?.email || settings.profile?.email || "";
+  $("#inboxProvider").value = settings.inbox?.provider || "Gmail";
+  openSettingsDialog($("#inboxDialog"));
+});
+$("#inboxForm").addEventListener("submit", (event) => {
+  if (event.submitter?.value === "cancel") return;
+  event.preventDefault();
+  if (!event.currentTarget.reportValidity()) return;
+  settings.inbox = {
+    email: $("#inboxEmail").value.trim(),
+    provider: $("#inboxProvider").value,
+  };
+  saveSettings();
+  $("#inboxDialog").close();
+  toast("Inbox label connected locally.");
+});
 document.querySelector('[title="Filters"]').addEventListener("click", () => toast(threads.length ? "Choose a filter below." : "There are no conversations to filter yet."));
 function openCompose() {
   $("#composeDialog").showModal();

@@ -734,6 +734,17 @@ input[type="date"],
   color: var(--text);
 }
 
+.dialog-check {
+  grid-template-columns: 20px 1fr;
+  align-items: center;
+}
+
+.dialog-help {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .compose-dialog-header,
 .compose-dialog-actions {
   display: flex;
