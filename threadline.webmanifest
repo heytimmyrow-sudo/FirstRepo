@@ -1,0 +1,20 @@
+{
+  "name": "Threadline",
+  "short_name": "Threadline",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#101419",
+  "theme_color": "#101419",
+  "icons": [
+    {
+      "src": "threadline-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "threadline-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
