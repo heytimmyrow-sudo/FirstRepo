@@ -11,6 +11,7 @@ let topicsSplit = false;
 let showAllMessages = false;
 let pendingGameType = "";
 let settings = loadSettings();
+let tutorialIndex = 0;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -349,6 +350,57 @@ $("#snoozeButton").addEventListener("click", () => toast("Thread snoozed until F
 $("#approvalButton").addEventListener("click", () => toast("Approval request created."));
 $("#undoSendButton").addEventListener("click", () => toast("Last send canceled. Draft restored."));
 $("#shortcutButton").addEventListener("click", () => toast("Shortcuts: C compose, E resolve, S snooze, / search."));
+$("#readerToolsButton").addEventListener("click", () => {
+  const panel = $("#readerToolsPanel");
+  panel.hidden = !panel.hidden;
+  $("#readerToolsButton").setAttribute("aria-expanded", String(!panel.hidden));
+});
+
+const tutorialSteps = [
+  { selector: "#composeButton", title: "Compose", text: "Start a live message to any handle. You can attach a game before sending." },
+  { selector: "#semanticSearch", title: "Search", text: "Find conversations quickly as your inbox fills up." },
+  { selector: "#threadAiButton", title: "ThreadAI", text: "Ask for reply help, rewrites, summaries, and ideas. Answers appear as a conversation." },
+  { selector: "#profileButton", title: "Profile and passcode", text: "Set your handle here. You can also add a passcode that locks Threadline on this device." },
+  { selector: ".thread-list-panel", title: "Conversations", text: "Your live messages appear here. Pick one to read it and send a reply." },
+  { selector: "#readerToolsButton", title: "Extra tools", text: "Open this only when you need summaries, tasks, topic splitting, or quote cleanup." },
+];
+
+function renderTutorial() {
+  document.querySelector(".tutorial-focus")?.classList.remove("tutorial-focus");
+  const step = tutorialSteps[tutorialIndex];
+  const target = document.querySelector(step.selector);
+  target?.classList.add("tutorial-focus");
+  $("#tutorialStep").textContent = `Tutorial ${tutorialIndex + 1} of ${tutorialSteps.length}`;
+  $("#tutorialTitle").textContent = step.title;
+  $("#tutorialText").textContent = step.text;
+  $("#tutorialBackButton").hidden = tutorialIndex === 0;
+  $("#tutorialNextButton").textContent = tutorialIndex === tutorialSteps.length - 1 ? "Done" : "Next";
+}
+
+function closeTutorial() {
+  document.querySelector(".tutorial-focus")?.classList.remove("tutorial-focus");
+  $("#tutorialLayer").hidden = true;
+}
+
+$("#tutorialButton").addEventListener("click", () => {
+  tutorialIndex = 0;
+  $("#tutorialLayer").hidden = false;
+  renderTutorial();
+});
+$("#tutorialCloseButton").addEventListener("click", closeTutorial);
+$("#tutorialBackButton").addEventListener("click", () => {
+  tutorialIndex -= 1;
+  renderTutorial();
+});
+$("#tutorialNextButton").addEventListener("click", () => {
+  if (tutorialIndex === tutorialSteps.length - 1) {
+    closeTutorial();
+    return;
+  }
+  tutorialIndex += 1;
+  renderTutorial();
+});
+
 function openSettingsDialog(dialog) {
   dialog.showModal();
   dialog.querySelector("input")?.focus();

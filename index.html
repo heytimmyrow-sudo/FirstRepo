@@ -67,6 +67,7 @@
           <div class="top-actions">
             <button class="icon-button" title="Refresh messages" id="refreshButton"><i data-lucide="refresh-cw"></i></button>
             <button class="icon-button" title="Message ThreadAI" id="threadAiButton"><i data-lucide="sparkles"></i></button>
+            <button class="icon-button" title="Tutorial" id="tutorialButton"><i data-lucide="circle-help"></i></button>
             <button class="icon-button" title="Keyboard shortcuts" id="shortcutButton"><i data-lucide="keyboard"></i></button>
             <button class="icon-button" title="Notification rules" id="notificationButton"><i data-lucide="bell-ring"></i></button>
             <button class="profile-button" title="Profile" id="profileButton"><span id="profileMark"><i data-lucide="user"></i></span></button>
@@ -139,19 +140,23 @@
               <button class="ghost-button" id="changedButton">What changed?</button>
             </div>
 
-            <div class="quick-actions">
-              <button data-action="summary"><i data-lucide="sparkles"></i> Summarize</button>
-              <button data-action="actions"><i data-lucide="list-checks"></i> Action Items</button>
-              <button data-action="questions"><i data-lucide="circle-help"></i> Questions</button>
-              <button data-action="tasklist"><i data-lucide="clipboard-check"></i> Make Tasks</button>
-              <button data-action="rewrite"><i data-lucide="wand-sparkles"></i> Rewrite</button>
-              <button data-action="labels"><i data-lucide="tags"></i> Auto-label</button>
-            </div>
-
-            <div class="topic-tools">
-              <button class="ghost-button" id="splitButton"><i data-lucide="split"></i> Split into topics</button>
-              <button class="ghost-button" id="mergeButton"><i data-lucide="merge"></i> Merge related</button>
-              <button class="ghost-button" id="quoteButton"><i data-lucide="eraser"></i> Clean quotes</button>
+            <div class="reader-tools">
+              <button class="ghost-button" id="readerToolsButton" aria-expanded="false"><i data-lucide="sliders-horizontal"></i> Tools</button>
+              <div class="reader-tools-panel" id="readerToolsPanel" hidden>
+                <div class="quick-actions">
+                  <button data-action="summary"><i data-lucide="sparkles"></i> Summarize</button>
+                  <button data-action="actions"><i data-lucide="list-checks"></i> Action Items</button>
+                  <button data-action="questions"><i data-lucide="circle-help"></i> Questions</button>
+                  <button data-action="tasklist"><i data-lucide="clipboard-check"></i> Make Tasks</button>
+                  <button data-action="rewrite"><i data-lucide="wand-sparkles"></i> Rewrite</button>
+                  <button data-action="labels"><i data-lucide="tags"></i> Auto-label</button>
+                </div>
+                <div class="topic-tools">
+                  <button class="ghost-button" id="splitButton"><i data-lucide="split"></i> Split into topics</button>
+                  <button class="ghost-button" id="mergeButton"><i data-lucide="merge"></i> Merge related</button>
+                  <button class="ghost-button" id="quoteButton"><i data-lucide="eraser"></i> Clean quotes</button>
+                </div>
+              </div>
             </div>
 
             <div id="messageStack" class="message-stack"></div>
@@ -311,6 +316,19 @@
         <button class="primary-action" type="submit">Unlock</button>
         <p class="dialog-help" id="lockStatus">This device is locked.</p>
       </form>
+    </section>
+
+    <section class="tutorial-layer" id="tutorialLayer" hidden>
+      <div class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle">
+        <span class="eyebrow" id="tutorialStep">Tutorial</span>
+        <h2 id="tutorialTitle"></h2>
+        <p id="tutorialText"></p>
+        <div class="tutorial-actions">
+          <button class="ghost-button" type="button" id="tutorialCloseButton">Close</button>
+          <button class="ghost-button" type="button" id="tutorialBackButton">Back</button>
+          <button class="primary-action small" type="button" id="tutorialNextButton">Next</button>
+        </div>
+      </div>
     </section>
 
     <div class="toast" id="toast" role="status"></div>
