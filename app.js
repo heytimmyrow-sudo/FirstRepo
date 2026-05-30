@@ -12,6 +12,7 @@ let showAllMessages = false;
 let pendingGameType = "";
 let settings = loadSettings();
 let tutorialIndex = 0;
+let showAllThreads = false;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -188,7 +189,9 @@ function renderThreads() {
     </div>`;
     return;
   }
-  list.innerHTML = threads
+  const visibleThreads = showAllThreads ? threads : threads.slice(0, 4);
+  const hiddenThreadCount = threads.length - visibleThreads.length;
+  list.innerHTML = visibleThreads
     .map(
       (thread) => `
         <button class="thread-card ${thread.id === activeThread?.id ? "active" : ""}" data-id="${escapeHtml(thread.id)}">
@@ -199,6 +202,14 @@ function renderThreads() {
       `,
     )
     .join("");
+  if (threads.length > 4) {
+    list.insertAdjacentHTML(
+      "beforeend",
+      `<button class="show-more-button" id="showMoreThreadsButton">
+        ${showAllThreads ? "Hide extra threads" : `Show ${hiddenThreadCount} more thread${hiddenThreadCount === 1 ? "" : "s"}`}
+      </button>`,
+    );
+  }
 
   list.querySelectorAll(".thread-card").forEach((button) => {
     button.addEventListener("click", () => {
@@ -208,6 +219,10 @@ function renderThreads() {
       showAllMessages = false;
       render();
     });
+  });
+  $("#showMoreThreadsButton")?.addEventListener("click", () => {
+    showAllThreads = !showAllThreads;
+    renderThreads();
   });
 }
 
