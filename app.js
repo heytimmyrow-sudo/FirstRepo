@@ -14,6 +14,7 @@ let settings = loadSettings();
 let tutorialIndex = 0;
 let showAllThreads = false;
 let appUnlocked = false;
+let pendingResetCode = "";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -438,6 +439,7 @@ $("#profileButton").addEventListener("click", () => {
   $("#profileEmail").value = settings.profile?.email || "";
   $("#profileWorkspace").value = settings.profile?.workspace || "";
   $("#profilePasscode").value = "";
+  $("#profileRecoveryEmail").value = settings.recoveryEmail || "";
   openSettingsDialog($("#profileDialog"));
 });
 $("#profileForm").addEventListener("submit", async (event) => {
@@ -450,6 +452,7 @@ $("#profileForm").addEventListener("submit", async (event) => {
     return;
   }
   const passcode = $("#profilePasscode").value.trim();
+  const recoveryEmail = $("#profileRecoveryEmail").value.trim().toLowerCase();
   const passcodeHash = passcode ? encodePasscode(passcode) : settings.passcodeHash || "";
   settings.profile = {
     name: $("#profileName").value.trim(),
@@ -458,9 +461,14 @@ $("#profileForm").addEventListener("submit", async (event) => {
     workspace: $("#profileWorkspace").value.trim(),
   };
   if (passcode) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recoveryEmail)) {
+      toast("Add a recovery email before setting a passcode.");
+      return;
+    }
     settings.passcodeHash = passcodeHash;
     appUnlocked = true;
   }
+  settings.recoveryEmail = recoveryEmail;
   saveSettings();
   $("#profileDialog").close();
   toast("Profile saved.");
@@ -598,6 +606,36 @@ $("#unlockForm").addEventListener("submit", (event) => {
   $("#unlockCode").value = "";
   saveSettings();
   toast("Threadline unlocked.");
+  fetchMessages();
+});
+$("#forgotPasscodeButton").addEventListener("click", () => {
+  $("#lockRecovery").hidden = !$("#lockRecovery").hidden;
+  $("#recoveryEmailHint").textContent = settings.recoveryEmail
+    ? `Reset code will be sent to ${settings.recoveryEmail}.`
+    : "Add a recovery email in Profile first.";
+});
+$("#sendResetCodeButton").addEventListener("click", () => {
+  if (!settings.recoveryEmail) {
+    $("#lockStatus").textContent = "No recovery email is saved.";
+    return;
+  }
+  pendingResetCode = String(Math.floor(100000 + Math.random() * 900000));
+  $("#resetPasscodeButton").hidden = false;
+  $("#lockStatus").textContent = "Enter the emailed reset code above.";
+  window.location.href = `mailto:${encodeURIComponent(settings.recoveryEmail)}?subject=Threadline%20reset%20code&body=Your%20Threadline%20reset%20code%20is%20${pendingResetCode}.`;
+});
+$("#resetPasscodeButton").addEventListener("click", () => {
+  if (!pendingResetCode || $("#unlockCode").value.trim() !== pendingResetCode) {
+    $("#lockStatus").textContent = "Enter the emailed reset code above first.";
+    return;
+  }
+  settings.passcodeHash = "";
+  pendingResetCode = "";
+  appUnlocked = true;
+  saveSettings();
+  $("#unlockCode").value = "";
+  $("#lockRecovery").hidden = true;
+  toast("Passcode reset. Add a new one in Profile.");
   fetchMessages();
 });
 document.addEventListener("visibilitychange", () => {

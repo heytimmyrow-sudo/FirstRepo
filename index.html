@@ -260,6 +260,7 @@
         <label>Email<input id="profileEmail" type="email" placeholder="you@example.com" /></label>
         <label>Workspace<input id="profileWorkspace" placeholder="Workspace name" /></label>
         <label>App passcode<input id="profilePasscode" type="password" placeholder="Optional device passcode" /></label>
+        <label>Recovery email<input id="profileRecoveryEmail" type="email" placeholder="you@example.com" /></label>
         <div class="compose-dialog-actions">
           <button class="ghost-button" type="button" data-close-dialog onclick="this.closest('dialog').close()">Cancel</button>
           <button class="primary-action small" value="default"><i data-lucide="save"></i> Save</button>
@@ -319,7 +320,13 @@
         <span class="eyebrow">Threadline</span>
         <h2>Enter passcode</h2>
         <input id="unlockCode" type="password" autocomplete="current-password" placeholder="Passcode" />
-        <button class="primary-action" type="submit">Unlock</button>
+        <button class="primary-action" type="submit">Enter</button>
+        <button class="ghost-button" type="button" id="forgotPasscodeButton">Forgot passcode?</button>
+        <div class="lock-recovery" id="lockRecovery" hidden>
+          <p class="dialog-help" id="recoveryEmailHint">Add a recovery email in Profile first.</p>
+          <button class="ghost-button" type="button" id="sendResetCodeButton">Send reset code</button>
+          <button class="ghost-button" type="button" id="resetPasscodeButton" hidden>Reset passcode</button>
+        </div>
         <p class="dialog-help" id="lockStatus">This device is locked.</p>
       </form>
     </section>

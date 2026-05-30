@@ -818,6 +818,12 @@ input[type="date"],
   color: var(--text);
 }
 
+.lock-recovery {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+
 .tutorial-layer {
   position: fixed;
   inset: 0;
