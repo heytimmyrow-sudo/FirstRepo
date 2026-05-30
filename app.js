@@ -13,6 +13,7 @@ let pendingGameType = "";
 let settings = loadSettings();
 let tutorialIndex = 0;
 let showAllThreads = false;
+let appUnlocked = false;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -103,7 +104,7 @@ async function sendRemoteMessage(recipient, subject, body, options = {}) {
 
 async function fetchMessages() {
   const handle = normalizeHandle(settings.profile?.handle || "");
-  if (!isValidHandle(handle) || (settings.passcodeHash && sessionStorage.getItem("threadlineUnlocked") !== "1")) return;
+  if (!isValidHandle(handle) || (settings.passcodeHash && !appUnlocked)) return;
   try {
     const query = `or=(sender_handle.eq.${handle},recipient_handle.eq.${handle})&order=created_at.desc&limit=200`;
     const response = await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}?${query}`, { headers: getHeaders() });
@@ -175,7 +176,7 @@ function renderSettings() {
     : '<i data-lucide="plug-zap"></i> Connect inbox';
   $("#themeToggle").checked = Boolean(settings.darkMode);
   document.body.classList.toggle("dark", Boolean(settings.darkMode));
-  $("#appLock").hidden = !settings.passcodeHash || sessionStorage.getItem("threadlineUnlocked") === "1";
+  $("#appLock").hidden = !settings.passcodeHash || appUnlocked;
   if (window.lucide) window.lucide.createIcons();
 }
 
@@ -458,7 +459,7 @@ $("#profileForm").addEventListener("submit", async (event) => {
   };
   if (passcode) {
     settings.passcodeHash = passcodeHash;
-    sessionStorage.setItem("threadlineUnlocked", "1");
+    appUnlocked = true;
   }
   saveSettings();
   $("#profileDialog").close();
@@ -593,10 +594,16 @@ $("#unlockForm").addEventListener("submit", (event) => {
     $("#lockStatus").textContent = "Wrong passcode.";
     return;
   }
-  sessionStorage.setItem("threadlineUnlocked", "1");
+  appUnlocked = true;
   $("#unlockCode").value = "";
   saveSettings();
   toast("Threadline unlocked.");
+  fetchMessages();
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden || !settings.passcodeHash) return;
+  appUnlocked = false;
+  renderSettings();
 });
 $("#toneButton").addEventListener("click", () => {
   $("#replyBox").value = "Thanks for the update. I will follow up with the next step shortly.";
