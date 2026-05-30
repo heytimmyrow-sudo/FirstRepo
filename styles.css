@@ -832,6 +832,11 @@ input[type="date"],
   font-size: 13px;
 }
 
+.lock-enter-button {
+  width: 100%;
+  min-height: 48px;
+}
+
 .tutorial-layer {
   position: fixed;
   inset: 0;

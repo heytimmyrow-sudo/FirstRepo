@@ -440,6 +440,7 @@ $("#profileButton").addEventListener("click", () => {
   $("#profileWorkspace").value = settings.profile?.workspace || "";
   $("#profilePasscode").value = "";
   $("#profileRecoveryEmail").value = settings.recoveryEmail || "";
+  $("#profileRememberMe").checked = localStorage.getItem("threadlineRemembered") === "1";
   openSettingsDialog($("#profileDialog"));
 });
 $("#profileForm").addEventListener("submit", async (event) => {
@@ -453,6 +454,7 @@ $("#profileForm").addEventListener("submit", async (event) => {
   }
   const passcode = $("#profilePasscode").value.trim();
   const recoveryEmail = $("#profileRecoveryEmail").value.trim().toLowerCase();
+  const rememberMe = $("#profileRememberMe").checked;
   const passcodeHash = passcode ? encodePasscode(passcode) : settings.passcodeHash || "";
   settings.profile = {
     name: $("#profileName").value.trim(),
@@ -470,6 +472,8 @@ $("#profileForm").addEventListener("submit", async (event) => {
     localStorage.removeItem("threadlineRemembered");
   }
   settings.recoveryEmail = recoveryEmail;
+  if (rememberMe) localStorage.setItem("threadlineRemembered", "1");
+  else localStorage.removeItem("threadlineRemembered");
   saveSettings();
   $("#profileDialog").close();
   toast("Profile saved.");
@@ -604,8 +608,6 @@ $("#unlockForm").addEventListener("submit", (event) => {
     return;
   }
   appUnlocked = true;
-  if ($("#rememberMe").checked) localStorage.setItem("threadlineRemembered", "1");
-  else localStorage.removeItem("threadlineRemembered");
   $("#unlockCode").value = "";
   saveSettings();
   toast("Threadline unlocked.");
