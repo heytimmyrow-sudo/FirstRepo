@@ -696,6 +696,8 @@ input[type="date"],
 
 .compose-dialog {
   width: min(560px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  overflow: auto;
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
