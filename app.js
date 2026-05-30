@@ -617,7 +617,6 @@ $("#pinButton").addEventListener("click", () => toast("Pinned the selected messa
 $("#snoozeButton").addEventListener("click", () => toast("Thread snoozed until Friday morning."));
 $("#approvalButton").addEventListener("click", () => toast("Approval request created."));
 $("#undoSendButton").addEventListener("click", () => toast("Last send canceled. Draft restored."));
-$("#shortcutButton").addEventListener("click", () => toast("Shortcuts: C compose, E resolve, S snooze, / search."));
 function setSidebarOpen(open) {
   document.body.classList.toggle("sidebar-open", open);
   $("#sidebarToggleButton").setAttribute("aria-expanded", String(open));
@@ -632,6 +631,15 @@ $("#readerToolsButton").addEventListener("click", () => {
   const panel = $("#readerToolsPanel");
   panel.hidden = !panel.hidden;
   $("#readerToolsButton").setAttribute("aria-expanded", String(!panel.hidden));
+});
+$("#filtersButton").addEventListener("click", () => {
+  const open = document.body.classList.toggle("filters-open");
+  $("#filtersButton").setAttribute("aria-expanded", String(open));
+});
+$("#inspectorButton").addEventListener("click", () => {
+  const open = document.body.classList.toggle("inspector-open");
+  $("#inspectorButton").setAttribute("aria-expanded", String(open));
+  if (open) $("#inspectorPanel").scrollIntoView({ behavior: "smooth", block: "nearest" });
 });
 
 const tutorialSteps = [
@@ -741,13 +749,13 @@ $("#profileForm").addEventListener("submit", async (event) => {
   fetchMessages();
 });
 
-$("#notificationButton").addEventListener("click", () => {
+function openNotificationDialog() {
   $("#notifyReplies").checked = Boolean(settings.notifications?.replies);
   $("#notifyMentions").checked = Boolean(settings.notifications?.mentions);
   $("#notifyFollowups").checked = Boolean(settings.notifications?.followups);
   $("#notifyDevice").checked = Boolean(settings.notifications?.device);
   openSettingsDialog($("#notificationDialog"));
-});
+}
 $("#notificationForm").addEventListener("submit", async (event) => {
   if (event.submitter?.value === "cancel") return;
   event.preventDefault();
@@ -780,7 +788,6 @@ $("#inboxForm").addEventListener("submit", (event) => {
   $("#inboxDialog").close();
   toast("Inbox label connected locally.");
 });
-document.querySelector('[title="Filters"]').addEventListener("click", () => toast(threads.length ? "Choose a filter below." : "There are no conversations to filter yet."));
 function openCompose() {
   pendingGameType = "";
   $("#gameAttachLabel").textContent = "None";
@@ -1044,7 +1051,7 @@ $("#inlineAiButton").addEventListener("click", () => {
   $("#aiPrompt").value = context;
   openSettingsDialog($("#aiDialog"));
 });
-$("#sidebarNotificationsButton").addEventListener("click", () => $("#notificationButton").click());
+$("#sidebarNotificationsButton").addEventListener("click", openNotificationDialog);
 $("#sidebarProfileButton").addEventListener("click", () => $("#profileButton").click());
 $("#installHelpButton").addEventListener("click", () => openSettingsDialog($("#installDialog")));
 

@@ -42,16 +42,6 @@
           <button><i data-lucide="users"></i> Shared Inbox <span>0</span></button>
         </nav>
 
-        <section class="side-section">
-          <div class="section-title">Smart Folders</div>
-          <p class="sidebar-empty">No smart folders yet</p>
-        </section>
-
-        <section class="side-section">
-          <div class="section-title">Saved Searches</div>
-          <p class="sidebar-empty">No saved searches yet</p>
-        </section>
-
         <section class="sidebar-upgrades">
           <details class="side-tool" open>
             <summary><span><i data-lucide="gamepad-2"></i> Game Lobby</span><b id="gameLobbyCount">0</b></summary>
@@ -94,8 +84,6 @@
             <button class="icon-button" title="Refresh messages" id="refreshButton"><i data-lucide="refresh-cw"></i></button>
             <button class="icon-button" title="Message ThreadAI" id="threadAiButton"><i data-lucide="sparkles"></i></button>
             <button class="icon-button" title="Tutorial" id="tutorialButton"><i data-lucide="circle-help"></i></button>
-            <button class="icon-button" title="Keyboard shortcuts" id="shortcutButton"><i data-lucide="keyboard"></i></button>
-            <button class="icon-button" title="Notification rules" id="notificationButton"><i data-lucide="bell-ring"></i></button>
             <button class="profile-button" title="Profile" id="profileButton"><span id="profileMark"><i data-lucide="user"></i></span></button>
           </div>
         </header>
@@ -107,7 +95,7 @@
                 <h2>Priority Threads</h2>
                 <p>Auto-ranked by urgency, stakeholders, and action debt</p>
               </div>
-              <button class="icon-button" title="Filters"><i data-lucide="sliders-horizontal"></i></button>
+              <button class="icon-button" title="Show filters" id="filtersButton" aria-expanded="false"><i data-lucide="sliders-horizontal"></i></button>
             </div>
 
             <div class="filter-row">
@@ -142,7 +130,7 @@
               <div class="reader-actions">
                 <button class="icon-button" title="Pin important message" id="pinButton"><i data-lucide="pin"></i></button>
                 <button class="icon-button" title="Snooze thread" id="snoozeButton"><i data-lucide="alarm-clock"></i></button>
-                <button class="icon-button" title="Send later"><i data-lucide="send"></i></button>
+                <button class="icon-button" title="Show conversation details" id="inspectorButton" aria-expanded="false"><i data-lucide="panel-right-open"></i></button>
                 <button class="primary-action small" id="approvalButton"><i data-lucide="stamp"></i> Approval</button>
               </div>
             </div>
@@ -187,11 +175,11 @@
                   <option>Ask for owner</option>
                   <option>Concise follow-up</option>
                 </select>
-                <button class="ghost-button" id="toneButton">Warmer</button>
+                <button class="icon-button" id="toneButton" title="Make reply warmer"><i data-lucide="wand-sparkles"></i></button>
                 <button class="icon-button" id="photoButton" title="Send photo"><i data-lucide="image-plus"></i></button>
                 <button class="icon-button" id="fileButton" title="Send file"><i data-lucide="paperclip"></i></button>
                 <button class="icon-button" id="voiceNoteButton" title="Record voice note"><i data-lucide="mic"></i></button>
-                <button class="ghost-button" id="inlineAiButton"><i data-lucide="sparkles"></i> Ask AI</button>
+                <button class="icon-button" id="inlineAiButton" title="Ask ThreadAI"><i data-lucide="sparkles"></i></button>
                 <button class="primary-action small" id="sendReplyButton"><i data-lucide="send-horizontal"></i> Send</button>
               </div>
               <input id="photoInput" type="file" accept="image/*" hidden />
@@ -199,7 +187,7 @@
             </div>
           </section>
 
-          <aside class="inspector-panel" aria-label="Thread inspector">
+          <aside class="inspector-panel" aria-label="Thread inspector" id="inspectorPanel">
             <section>
               <div class="panel-header compact">
                 <h2>Workflow</h2>
