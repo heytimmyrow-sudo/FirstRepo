@@ -270,6 +270,32 @@ h2 {
   margin-bottom: 18px;
 }
 
+.unread-notification-strip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 42px;
+  margin-bottom: 14px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--brand) 42%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--brand) 10%, var(--panel));
+  color: var(--text);
+  text-align: left;
+}
+
+.unread-notification-strip span {
+  min-width: 24px;
+  margin-left: auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 12px;
+  text-align: center;
+}
+
 .search-wrap {
   display: flex;
   align-items: center;

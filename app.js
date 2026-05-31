@@ -296,10 +296,62 @@ function notifyNewUnread(rows, handle) {
     initialMessageFetch = false;
     return;
   }
-  if (!fresh.length || !settings.notifications?.device || !("Notification" in window) || Notification.permission !== "granted") return;
+  if (!fresh.length) return;
+  playMessageChime();
+  if (!settings.notifications?.device || !("Notification" in window) || Notification.permission !== "granted") return;
   const row = fresh[0];
   const notificationBody = unpackGroupBody(row.body).body;
-  new Notification(`New Threadline message from ${row.sender_handle}`, { body: row.subject || notificationBody.slice(0, 80), icon: "threadline-icon-192.png" });
+  const unreadCount = getUnreadCount();
+  const options = { body: `${row.sender_handle}: ${row.subject || notificationBody.slice(0, 80)}`, icon: "threadline-icon-192.png", badge: "threadline-icon-192.png", tag: "threadline-unread", renotify: true, data: { url: "./" } };
+  const title = unreadCount === 1 ? "New Threadline message" : `${unreadCount} unread Threadline messages`;
+  if (serviceWorkerRegistration) serviceWorkerRegistration.showNotification(title, options);
+  else new Notification(title, options);
+}
+
+function getUnreadCount() {
+  return threads.reduce((total, thread) => total + Number(thread.unreadCount || 0), 0);
+}
+
+async function updateAppBadge(unreadCount) {
+  try {
+    if (unreadCount && "setAppBadge" in navigator) await navigator.setAppBadge(unreadCount);
+    else if (!unreadCount && "clearAppBadge" in navigator) await navigator.clearAppBadge();
+  } catch {
+    // Installed-app badges are optional across browsers.
+  }
+}
+
+function updateUnreadNotification() {
+  const unreadCount = getUnreadCount();
+  document.title = unreadCount ? `(${unreadCount}) Threadline` : "Threadline";
+  $("#inboxCount").textContent = String(unreadCount);
+  $("#unreadNotificationStrip").hidden = !unreadCount;
+  $("#unreadNotificationCount").textContent = String(unreadCount);
+  $("#unreadNotificationText").textContent = unreadCount === 1 ? "You have 1 unread message." : `You have ${unreadCount} unread messages.`;
+  updateAppBadge(unreadCount);
+}
+
+function playMessageChime() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const audio = new AudioContext();
+    const now = audio.currentTime;
+    const gain = audio.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.08, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    gain.connect(audio.destination);
+    [660, 880].forEach((frequency, index) => {
+      const oscillator = audio.createOscillator();
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.09);
+      oscillator.connect(gain);
+      oscillator.start(now + index * 0.09);
+      oscillator.stop(now + 0.24 + index * 0.09);
+    });
+  } catch {
+    // The visual unread indicator still updates if sound is blocked.
+  }
 }
 
 function getCallPeer() {
@@ -827,6 +879,7 @@ async function markThreadRead(thread) {
   const now = new Date().toISOString();
   unreadRows.forEach((row) => { row.read_at = now; });
   thread.unreadCount = 0;
+  updateUnreadNotification();
   try {
     const ids = unreadRows.map((row) => encodeURIComponent(row.id)).join(",");
     await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}?id=in.(${ids})`, {
@@ -973,7 +1026,7 @@ function renderReader() {
 function render() {
   renderThreads();
   renderReader();
-  $("#inboxCount").textContent = String(threads.length);
+  updateUnreadNotification();
   renderSidebarData();
   renderSettings();
   if (window.lucide) window.lucide.createIcons();
@@ -1564,6 +1617,15 @@ $("#inlineAiButton").addEventListener("click", () => {
 $("#sidebarNotificationsButton").addEventListener("click", openNotificationDialog);
 $("#sidebarProfileButton").addEventListener("click", () => $("#profileButton").click());
 $("#installHelpButton").addEventListener("click", () => openSettingsDialog($("#installDialog")));
+$("#unreadNotificationStrip").addEventListener("click", () => {
+  const thread = threads.find((item) => item.unreadCount > 0);
+  if (!thread) return;
+  activeThread = thread;
+  showAllMessages = false;
+  markThreadRead(thread);
+  render();
+  document.querySelector(".reader-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+});
 
 render();
 registerServiceWorker().then(renderBackgroundCallStatus);
