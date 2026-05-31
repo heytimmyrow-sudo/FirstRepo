@@ -30,6 +30,7 @@ let knownCallCandidateCounts = { caller: 0, callee: 0 };
 let ringtoneAudio = null;
 let ringtoneTimer = null;
 let ringtoneUnlocked = false;
+let serviceWorkerRegistration = null;
 
 let activeThread = null;
 let quotesCleaned = false;
@@ -371,12 +372,38 @@ async function enableIncomingRingSound() {
 
 function notifyIncomingCall(call) {
   if (!settings.notifications?.device || !("Notification" in window) || Notification.permission !== "granted") return;
-  new Notification(`Incoming ${call.call_type === "video" ? "FaceTime" : "voice call"}`, {
+  const options = {
     body: `${call.caller_handle} is calling you on Threadline.`,
     icon: "threadline-icon-192.png",
+    badge: "threadline-icon-192.png",
     tag: `threadline-call-${call.id}`,
     requireInteraction: true,
-  });
+    data: { url: "./?incomingCall=1", callId: call.id },
+  };
+  if (serviceWorkerRegistration) serviceWorkerRegistration.showNotification(`Incoming ${call.call_type === "video" ? "FaceTime" : "voice call"}`, options);
+  else new Notification(`Incoming ${call.call_type === "video" ? "FaceTime" : "voice call"}`, options);
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    serviceWorkerRegistration = await navigator.serviceWorker.register("./threadline-sw.js", { updateViaCache: "none" });
+    await navigator.serviceWorker.ready;
+  } catch {
+    serviceWorkerRegistration = null;
+  }
+}
+
+function renderBackgroundCallStatus() {
+  const status = $("#backgroundCallStatus");
+  if (!status) return;
+  if (!("serviceWorker" in navigator)) {
+    status.textContent = "This browser cannot receive installed-app call alerts.";
+    return;
+  }
+  status.textContent = serviceWorkerRegistration
+    ? "Tap-to-answer call alerts are installed. Fully closed-app delivery still needs the Threadline push sender."
+    : "Installed-app call alerts will finish preparing after this page reloads.";
 }
 
 async function patchCall(callId, data) {
@@ -1088,6 +1115,7 @@ function openNotificationDialog() {
   $("#notifyMentions").checked = Boolean(settings.notifications?.mentions);
   $("#notifyFollowups").checked = Boolean(settings.notifications?.followups);
   $("#notifyDevice").checked = Boolean(settings.notifications?.device);
+  renderBackgroundCallStatus();
   openSettingsDialog($("#notificationDialog"));
 }
 $("#notificationForm").addEventListener("submit", async (event) => {
@@ -1410,6 +1438,7 @@ $("#sidebarProfileButton").addEventListener("click", () => $("#profileButton").c
 $("#installHelpButton").addEventListener("click", () => openSettingsDialog($("#installDialog")));
 
 render();
+registerServiceWorker().then(renderBackgroundCallStatus);
 fetchMessages();
 window.setInterval(fetchMessages, 15000);
 window.setInterval(pollCalls, 2500);
