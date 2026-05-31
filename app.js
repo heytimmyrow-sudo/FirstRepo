@@ -11,6 +11,7 @@ const FILE_PREFIX = "THREADLINE_FILE::";
 const CALL_LOG_PREFIX = "THREADLINE_CALL_LOG::";
 const GROUP_PREFIX = "THREADLINE_GROUP::";
 const AI_HANDLE = "threadai";
+const DEFAULT_NOTIFICATIONS = { replies: true, mentions: true, followups: true, device: true };
 const ICE_SERVERS = [
   { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
   { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" },
@@ -55,9 +56,19 @@ const $ = (selector) => document.querySelector(selector);
 
 function loadSettings() {
   try {
-    return JSON.parse(localStorage.getItem("threadlineSettings") || "{}");
+    const saved = JSON.parse(localStorage.getItem("threadlineSettings") || "{}");
+    return { ...saved, notifications: { ...DEFAULT_NOTIFICATIONS, ...saved?.notifications } };
   } catch {
-    return {};
+    return { notifications: { ...DEFAULT_NOTIFICATIONS } };
+  }
+}
+
+async function requestDefaultNotificationPermission() {
+  if (!settings.notifications?.device || !("Notification" in window) || Notification.permission !== "default") return;
+  try {
+    await Notification.requestPermission();
+  } catch {
+    // Some mobile browsers only allow notification prompts in installed apps.
   }
 }
 
@@ -1629,6 +1640,7 @@ $("#unreadNotificationStrip").addEventListener("click", () => {
 
 render();
 registerServiceWorker().then(renderBackgroundCallStatus);
+document.addEventListener("click", requestDefaultNotificationPermission, { once: true });
 fetchMessages();
 window.setInterval(fetchMessages, 15000);
 window.setInterval(pollCalls, 2500);
