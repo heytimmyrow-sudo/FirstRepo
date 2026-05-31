@@ -27,6 +27,9 @@ let typingIdleTimer = null;
 let lastTypingSentAt = 0;
 let callSession = null;
 let knownCallCandidateCounts = { caller: 0, callee: 0 };
+let ringtoneAudio = null;
+let ringtoneTimer = null;
+let ringtoneUnlocked = false;
 
 let activeThread = null;
 let quotesCleaned = false;
@@ -301,12 +304,79 @@ function showCallPanel({ label = "Threadline call", status = "Connecting...", in
   $("#callStatus").textContent = status;
   $("#callVideoStage").hidden = !video;
   $("#acceptCallButton").hidden = !incoming;
+  $("#enableRingButton").hidden = !incoming || ringtoneUnlocked;
   $("#muteCallButton").hidden = !connected;
 }
 
 function hideCallPanel() {
   $("#callOverlay").hidden = true;
   $("#callVideoStage").hidden = true;
+}
+
+async function ensureRingtoneAudio() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return null;
+  ringtoneAudio ||= new AudioContext();
+  if (ringtoneAudio.state === "suspended") await ringtoneAudio.resume();
+  ringtoneUnlocked = ringtoneAudio.state === "running";
+  return ringtoneAudio;
+}
+
+async function playRingToneOnce() {
+  try {
+    const audio = await ensureRingtoneAudio();
+    if (!audio) return false;
+    const now = audio.currentTime;
+    const gain = audio.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
+    gain.connect(audio.destination);
+    [740, 920].forEach((frequency, index) => {
+      const oscillator = audio.createOscillator();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.2);
+      oscillator.connect(gain);
+      oscillator.start(now + index * 0.2);
+      oscillator.stop(now + 0.3 + index * 0.2);
+    });
+    return true;
+  } catch {
+    ringtoneUnlocked = false;
+    return false;
+  }
+}
+
+function startIncomingRingtone() {
+  if (ringtoneTimer) return;
+  playRingToneOnce().then(() => { $("#enableRingButton").hidden = ringtoneUnlocked; });
+  if ("vibrate" in navigator) navigator.vibrate([220, 120, 220]);
+  ringtoneTimer = window.setInterval(() => {
+    playRingToneOnce().then(() => { $("#enableRingButton").hidden = ringtoneUnlocked; });
+    if ("vibrate" in navigator) navigator.vibrate([220, 120, 220]);
+  }, 1500);
+}
+
+function stopIncomingRingtone() {
+  if (ringtoneTimer) window.clearInterval(ringtoneTimer);
+  ringtoneTimer = null;
+  if ("vibrate" in navigator) navigator.vibrate(0);
+}
+
+async function enableIncomingRingSound() {
+  await playRingToneOnce();
+  $("#enableRingButton").hidden = ringtoneUnlocked;
+  $("#callStatus").textContent = ringtoneUnlocked ? "Ringing..." : "Sound is blocked. Keep this screen open for vibration.";
+}
+
+function notifyIncomingCall(call) {
+  if (!settings.notifications?.device || !("Notification" in window) || Notification.permission !== "granted") return;
+  new Notification(`Incoming ${call.call_type === "video" ? "FaceTime" : "voice call"}`, {
+    body: `${call.caller_handle} is calling you on Threadline.`,
+    icon: "threadline-icon-192.png",
+    tag: `threadline-call-${call.id}`,
+    requireInteraction: true,
+  });
 }
 
 async function patchCall(callId, data) {
@@ -397,6 +467,7 @@ async function startCall(mediaType) {
 
 async function acceptCall() {
   if (!callSession?.call || callSession.role !== "callee") return;
+  stopIncomingRingtone();
   try {
     const { peer, stream } = await createCallPeer("callee", callSession.call);
     callSession.peer = peer;
@@ -449,7 +520,8 @@ async function pollCalls() {
     callSession = { role: "callee", call, peer: null, stream: null, accepted: false, muted: false };
     knownCallCandidateCounts = { caller: 0, callee: 0 };
     showCallPanel({ label: `Incoming ${call.call_type === "video" ? "FaceTime" : "voice call"} from ${call.caller_handle}`, status: "Incoming call", incoming: true, video: call.call_type === "video" });
-    if ("vibrate" in navigator) navigator.vibrate([220, 120, 220]);
+    startIncomingRingtone();
+    notifyIncomingCall(call);
   } catch {
     // Calling is optional if the shared call table is not configured.
   }
@@ -463,6 +535,7 @@ function toggleCallMute() {
 }
 
 function endLocalCall() {
+  stopIncomingRingtone();
   callSession?.stream?.getTracks().forEach((track) => track.stop());
   callSession?.peer?.close();
   callSession = null;
@@ -471,7 +544,6 @@ function endLocalCall() {
   $("#remoteCallVideo").srcObject = null;
   $("#localCallVideo").srcObject = null;
   $("#muteCallButton span").textContent = "Mute";
-  if ("vibrate" in navigator) navigator.vibrate(0);
   hideCallPanel();
 }
 
@@ -1111,8 +1183,12 @@ $("#refreshButton").addEventListener("click", fetchMessages);
 $("#voiceCallButton").addEventListener("click", () => startCall("voice"));
 $("#videoCallButton").addEventListener("click", () => startCall("video"));
 $("#acceptCallButton").addEventListener("click", acceptCall);
+$("#enableRingButton").addEventListener("click", enableIncomingRingSound);
 $("#muteCallButton").addEventListener("click", toggleCallMute);
 $("#endCallButton").addEventListener("click", endCall);
+document.addEventListener("pointerdown", () => {
+  if (!ringtoneUnlocked) ensureRingtoneAudio().catch(() => {});
+}, { once: true });
 $("#threadAiButton").addEventListener("click", () => openSettingsDialog($("#aiDialog")));
 function getBasicAiReply(prompt) {
   const text = prompt.toLowerCase();

@@ -800,6 +800,7 @@ input[type="date"],
 
 .call-action.accept { background: #168656; }
 .call-action.end { background: #c72f4f; }
+.call-action.sound { background: #2364d2; }
 
 .compose-dialog {
   width: min(560px, calc(100vw - 28px));
