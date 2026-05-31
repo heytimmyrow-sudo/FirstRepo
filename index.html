@@ -50,6 +50,7 @@
           <details class="side-tool">
             <summary><span><i data-lucide="contact"></i> Contacts</span><b id="contactsCount">0</b></summary>
             <div id="contactList" class="side-tool-list"></div>
+            <button class="sidebar-manage-button" id="manageContactsButton"><i data-lucide="contact-round"></i> Manage contacts</button>
           </details>
           <details class="side-tool">
             <summary><span><i data-lucide="settings-2"></i> Settings</span></summary>
@@ -62,6 +63,10 @@
         </section>
 
         <div class="sidebar-footer">
+          <button class="sidebar-identity" id="sidebarIdentityButton" title="Open profile">
+            <span class="avatar-image avatar-fallback" id="sidebarProfileAvatar"><i data-lucide="user"></i></span>
+            <span><strong id="sidebarProfileName">Your profile</strong><small id="sidebarProfileHandle">Add your handle</small></span>
+          </button>
           <label class="toggle-row">
             <span>Dark mode</span>
             <input type="checkbox" id="themeToggle" />
@@ -130,7 +135,7 @@
                   <span id="threadStatus" class="status-pill open">Open</span>
                   <span id="threadLabels"></span>
                 </div>
-                <h2 id="threadTitle"></h2>
+                <div class="thread-heading"><span class="avatar-image avatar-fallback" id="threadAvatar"><i data-lucide="user-round"></i></span><h2 id="threadTitle"></h2></div>
                 <p id="threadSubtitle"></p>
                 <p class="presence-line" id="detailPresence"></p>
               </div>
@@ -221,13 +226,13 @@
             <section>
               <div class="panel-header compact">
                 <h2>Workflow</h2>
-                <button class="icon-button" title="Assign thread"><i data-lucide="user-plus"></i></button>
+                <button class="icon-button" title="Add workflow owner" id="assignThreadButton"><i data-lucide="user-plus"></i></button>
               </div>
               <div class="workflow-grid">
-                <label>Owner<select><option>Unassigned</option></select></label>
+                <label>Owner<select id="ownerSelect"><option>Unassigned</option></select></label>
                 <label>Status<select id="statusSelect"><option>Open</option><option>Waiting</option><option>Resolved</option></select></label>
-                <label>Follow-up<input type="date" /></label>
-                <label>Priority<select><option>High</option><option>Normal</option><option>Low</option></select></label>
+                <label>Follow-up<input type="date" id="followupInput" /></label>
+                <label>Priority<select id="prioritySelect"><option>High</option><option>Normal</option><option>Low</option></select></label>
               </div>
             </section>
 
@@ -322,6 +327,23 @@
         <div class="compose-dialog-actions">
           <button class="ghost-button" type="button" data-close-dialog onclick="this.closest('dialog').close()">Cancel</button>
           <button class="primary-action small" value="default"><i data-lucide="save"></i> Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="compose-dialog" id="contactsDialog">
+      <form method="dialog" id="contactsForm">
+        <div class="compose-dialog-header">
+          <h2>Contacts</h2>
+          <button class="icon-button" type="button" data-close-dialog onclick="this.closest('dialog').close()" title="Close contacts"><i data-lucide="x"></i></button>
+        </div>
+        <div class="contacts-manager-list" id="contactsManagerList"></div>
+        <label>Name<input id="contactNameInput" placeholder="Contact name" /></label>
+        <label>Threadline handle<input id="contactHandleInput" required placeholder="example: sam" /></label>
+        <label>Profile picture<input id="contactAvatarInput" type="file" accept="image/*" /></label>
+        <div class="compose-dialog-actions">
+          <button class="ghost-button" type="button" data-close-dialog onclick="this.closest('dialog').close()">Cancel</button>
+          <button class="primary-action small" value="default"><i data-lucide="user-plus"></i> Add contact</button>
         </div>
       </form>
     </dialog>

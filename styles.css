@@ -251,6 +251,40 @@ h2 {
   margin-top: auto;
 }
 
+.sidebar-identity,
+.contact-manager-item,
+.thread-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.sidebar-identity {
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.sidebar-identity span:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sidebar-identity strong,
+.sidebar-identity small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-identity small {
+  color: var(--muted);
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
@@ -385,6 +419,11 @@ body.inspector-open .inspector-panel:not(.is-empty) {
   gap: 14px;
 }
 
+.thread-toolbar,
+.reader-actions {
+  flex-wrap: wrap;
+}
+
 .panel-header.compact {
   margin-bottom: 10px;
 }
@@ -507,11 +546,16 @@ body.filters-open .filter-row {
 
 .thread-title-block {
   min-width: 0;
+  flex: 1 1 180px;
 }
 
 .thread-title-block h2 {
   margin: 4px 0;
   font-size: 22px;
+}
+
+.thread-heading {
+  margin-top: 4px;
 }
 
 .status-pill {
@@ -775,6 +819,19 @@ body.filters-open .filter-row {
   border-radius: 50%;
   background: var(--panel-strong);
   object-fit: cover;
+}
+
+.avatar-fallback {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.avatar-image[src] {
+  display: inline-block;
 }
 
 .group-avatar-small {
@@ -1245,6 +1302,57 @@ svg {
 
 .side-tool-list button:hover {
   color: var(--text);
+}
+
+.sidebar-manage-button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 30px;
+  margin-top: 6px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.contact-sidebar-avatar {
+  width: 24px;
+  height: 24px;
+}
+
+.contact-presence {
+  color: var(--brand-2);
+  font-size: 11px;
+}
+
+.contacts-manager-list {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.contact-manager-item {
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.contact-manager-item > span:nth-child(2) {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.contact-manager-item button {
+  border: 0;
+  background: transparent;
+  color: var(--danger);
 }
 
 .thread-card {

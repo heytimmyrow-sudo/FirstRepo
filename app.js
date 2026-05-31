@@ -46,6 +46,7 @@ let replyTarget = null;
 let conversationSearch = "";
 let pausedVoiceMs = 0;
 let voicePausedAt = 0;
+let pendingContactAvatar = "";
 
 let activeThread = null;
 let quotesCleaned = false;
@@ -198,6 +199,48 @@ function toggleSettingList(key, value) {
   return values.has(value);
 }
 
+function getContactProfiles() {
+  return settings.contactProfiles && typeof settings.contactProfiles === "object" ? settings.contactProfiles : {};
+}
+
+function getContactProfile(handle) {
+  const normalized = normalizeHandle(handle || "");
+  if (normalized === settings.profile?.handle) return settings.profile || { handle: normalized };
+  return getContactProfiles()[normalized] || { handle: normalized };
+}
+
+function getContactName(handle) {
+  const profile = getContactProfile(handle);
+  return profile.name || profile.handle || handle;
+}
+
+function getInitials(value) {
+  return String(value || "?").split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+}
+
+function renderAvatarMarkup(handle, className = "avatar-image") {
+  const profile = getContactProfile(handle);
+  return profile.avatar
+    ? `<img class="${className}" src="${escapeHtml(profile.avatar)}" alt="" />`
+    : `<span class="${className} avatar-fallback">${escapeHtml(getInitials(profile.name || profile.handle))}</span>`;
+}
+
+function getAllContacts() {
+  const fromThreads = threads.flatMap((thread) => thread.recipients || [thread.people]);
+  return [...new Set([...Object.keys(getContactProfiles()), ...fromThreads].map(normalizeHandle).filter(Boolean))];
+}
+
+function getThreadWorkflow(thread = activeThread) {
+  return settings.threadWorkflow?.[thread?.id] || { owner: "", followup: "", priority: "Normal" };
+}
+
+function saveThreadWorkflow(patch) {
+  if (!activeThread) return;
+  settings.threadWorkflow ||= {};
+  settings.threadWorkflow[activeThread.id] = { ...getThreadWorkflow(), ...patch };
+  saveSettings();
+}
+
 function getOutgoingQueue() {
   try {
     return JSON.parse(localStorage.getItem("threadlineOutgoingQueue") || "[]");
@@ -336,9 +379,9 @@ async function fetchMessages() {
         people,
         recipients: group ? group.members.filter((member) => member !== handle) : [other],
         group,
-        status: "Open",
+        status: settings.threadWorkflow?.[key]?.status || "Open",
         labels: group ? `${group.members.length} people` : game || decoded.game ? `Game: ${getGameTitle(game?.type || decoded.game)}` : "Live",
-        urgency: "Normal",
+        urgency: settings.threadWorkflow?.[key]?.priority || "Normal",
         receipt: "Synced",
         summary: game || decoded.game ? `${other} shared a ${getGameTitle(game?.type || decoded.game)} game.` : decoded.body.slice(0, 120),
         changed: "Synced from live messaging.",
@@ -827,6 +870,9 @@ function renderSettings() {
   $("#profileMark").textContent = initials || "";
   if (settings.profile?.avatar) $("#profileMark").innerHTML = `<img class="avatar-image" src="${escapeHtml(settings.profile.avatar)}" alt="" />`;
   else if (!initials) $("#profileMark").innerHTML = '<i data-lucide="user"></i>';
+  $("#sidebarProfileAvatar").outerHTML = renderAvatarMarkup(settings.profile?.handle || "", "avatar-image avatar-fallback") .replace("<img ", '<img id="sidebarProfileAvatar" ').replace("<span ", '<span id="sidebarProfileAvatar" ');
+  $("#sidebarProfileName").textContent = settings.profile?.name || "Your profile";
+  $("#sidebarProfileHandle").textContent = settings.profile?.handle ? `@${settings.profile.handle}` : "Add your handle";
   $("#emptyReaderText").textContent = settings.inbox
     ? `${settings.inbox.provider} inbox ${settings.inbox.email} is labeled as connected. Compose a message to start your first thread.`
     : "Connect an inbox or compose a message to start your first thread.";
@@ -1081,6 +1127,16 @@ function renderPrivacyControls() {
   $("#privacyStatus").textContent = blocked ? `${contact} is blocked. New incoming messages are hidden.` : favorite ? `${contact} is saved as a favorite.` : "";
 }
 
+function renderWorkflow() {
+  const workflow = getThreadWorkflow();
+  const contacts = getAllContacts();
+  const ownerOptions = ["", settings.profile?.handle || "", ...contacts].filter((handle, index, all) => all.indexOf(handle) === index);
+  $("#ownerSelect").innerHTML = ownerOptions.map((handle) => `<option value="${escapeHtml(handle)}">${escapeHtml(handle ? getContactName(handle) : "Unassigned")}</option>`).join("");
+  $("#ownerSelect").value = workflow.owner || "";
+  $("#followupInput").value = workflow.followup || "";
+  $("#prioritySelect").value = workflow.priority || "Normal";
+}
+
 function activeTypingHandle() {
   if (!activeThread) return "";
   return typingRows.find((row) => activeThread.recipients.includes(row.sender_handle) && row.subject_key === activeThread.title.toLowerCase().slice(0, 120))?.sender_handle || "";
@@ -1096,9 +1152,9 @@ function renderSidebarData() {
     : `<span class="sidebar-empty">No active games yet</span>`;
   $("#gameLobbyCount").textContent = String(gameRows.length);
   const favorites = getSettingList("favoriteHandles");
-  const contacts = [...new Set(threads.flatMap((thread) => thread.recipients || [thread.people]))].filter(Boolean).sort((a, b) => Number(favorites.includes(b)) - Number(favorites.includes(a)) || a.localeCompare(b));
+  const contacts = getAllContacts().sort((a, b) => Number(favorites.includes(b)) - Number(favorites.includes(a)) || a.localeCompare(b));
   $("#contactList").innerHTML = contacts.length
-    ? contacts.map((contact) => `<button data-contact="${escapeHtml(contact)}"><i data-lucide="${favorites.includes(contact) ? "star" : "user-round"}"></i> ${escapeHtml(contact)}</button>`).join("")
+    ? contacts.map((contact) => `<button data-contact="${escapeHtml(contact)}">${renderAvatarMarkup(contact, "avatar-image contact-sidebar-avatar")}<span>${escapeHtml(getContactName(contact))}<br><small class="contact-presence">${escapeHtml(activeTypingHandle() === contact ? "Typing..." : "Available")}</small></span></button>`).join("")
     : `<span class="sidebar-empty">Contacts appear after you message someone</span>`;
   $("#contactsCount").textContent = String(contacts.length);
   lobby.querySelectorAll("[data-game-open]").forEach((button) => button.addEventListener("click", () => {
@@ -1257,6 +1313,12 @@ function renderReader() {
     return;
   }
   $("#threadTitle").textContent = activeThread.title;
+  const avatarHandle = activeThread.group ? "" : activeThread.recipients[0];
+  $("#threadAvatar").outerHTML = activeThread.group && settings.groupAvatars?.[activeThread.group.id]
+    ? `<img class="avatar-image" id="threadAvatar" src="${escapeHtml(settings.groupAvatars[activeThread.group.id])}" alt="" />`
+    : activeThread.group
+      ? `<span class="avatar-image avatar-fallback" id="threadAvatar">${escapeHtml(getInitials(activeThread.group.name))}</span>`
+    : renderAvatarMarkup(avatarHandle, "avatar-image avatar-fallback").replace("<img ", '<img id="threadAvatar" ').replace("<span ", '<span id="threadAvatar" ');
   $("#threadSubtitle").textContent = `${activeThread.group ? `Group with ${activeThread.people}` : activeThread.people} · ${activeThread.messages.length} message${activeThread.messages.length === 1 ? "" : "s"} · read receipt ${activeThread.receipt}`;
   const groupAvatar = activeThread.group && settings.groupAvatars?.[activeThread.group.id];
   $("#threadLabels").innerHTML = `${groupAvatar ? `<img class="group-avatar-small" src="${escapeHtml(groupAvatar)}" alt="" /> ` : ""}${escapeHtml(activeThread.labels)}`;
@@ -1273,6 +1335,7 @@ function renderReader() {
   renderGameBoard();
   renderGroupInfo();
   renderPrivacyControls();
+  renderWorkflow();
 }
 
 function render() {
@@ -1483,6 +1546,55 @@ $("#profileAvatar").addEventListener("change", async (event) => {
 });
 $("#profilePasscode").addEventListener("input", keepDigitsOnly);
 $("#unlockCode").addEventListener("input", keepDigitsOnly);
+
+function renderContactsManager() {
+  const contacts = getAllContacts().sort((a, b) => getContactName(a).localeCompare(getContactName(b)));
+  $("#contactsManagerList").innerHTML = contacts.length
+    ? contacts.map((handle) => `<div class="contact-manager-item">
+        ${renderAvatarMarkup(handle)}
+        <span><strong>${escapeHtml(getContactName(handle))}</strong><small>@${escapeHtml(handle)} · Available</small></span>
+        <button type="button" data-remove-contact="${escapeHtml(handle)}" title="Remove contact"><i data-lucide="trash-2"></i></button>
+      </div>`).join("")
+    : `<p class="dialog-help">Add a contact to start building your people list.</p>`;
+  $("#contactsManagerList").querySelectorAll("[data-remove-contact]").forEach((button) => button.addEventListener("click", () => {
+    settings.contactProfiles ||= {};
+    delete settings.contactProfiles[button.dataset.removeContact];
+    saveSettings();
+    renderContactsManager();
+    renderSidebarData();
+  }));
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function openContactsManager() {
+  pendingContactAvatar = "";
+  $("#contactsForm").reset();
+  renderContactsManager();
+  openSettingsDialog($("#contactsDialog"));
+}
+
+$("#manageContactsButton").addEventListener("click", openContactsManager);
+$("#contactAvatarInput").addEventListener("change", async (event) => {
+  if (!event.target.files[0]) return;
+  try {
+    pendingContactAvatar = await readFileAsDataUrl(event.target.files[0], 300 * 1024);
+  } catch (error) {
+    toast(error.message);
+  }
+});
+$("#contactsForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const handle = normalizeHandle($("#contactHandleInput").value);
+  if (!isValidHandle(handle)) return toast("Contact handle must be 3-24 letters, numbers, or underscores.");
+  settings.contactProfiles ||= {};
+  settings.contactProfiles[handle] = { handle, name: $("#contactNameInput").value.trim() || handle, avatar: pendingContactAvatar };
+  saveSettings();
+  pendingContactAvatar = "";
+  event.currentTarget.reset();
+  renderContactsManager();
+  renderSidebarData();
+  toast(`${getContactName(handle)} added to contacts.`);
+});
 
 $("#saveGroupButton").addEventListener("click", async () => {
   if (!activeThread?.group) return;
@@ -1753,8 +1865,36 @@ $("#templateSelect").addEventListener("change", (event) => {
 $("#statusSelect").addEventListener("change", (event) => {
   if (!activeThread) return;
   activeThread.status = event.target.value;
+  saveThreadWorkflow({ status: activeThread.status });
   renderReader();
   toast(`Thread marked ${activeThread.status}.`);
+});
+$("#ownerSelect").addEventListener("change", (event) => {
+  if (!activeThread) return;
+  saveThreadWorkflow({ owner: event.target.value });
+  toast(event.target.value ? `Assigned to ${getContactName(event.target.value)}.` : "Thread unassigned.");
+});
+$("#followupInput").addEventListener("change", (event) => {
+  saveThreadWorkflow({ followup: event.target.value });
+  toast(event.target.value ? "Follow-up saved." : "Follow-up cleared.");
+});
+$("#prioritySelect").addEventListener("change", (event) => {
+  if (!activeThread) return;
+  activeThread.urgency = event.target.value;
+  saveThreadWorkflow({ priority: event.target.value });
+  renderThreads();
+  toast(`Priority set to ${event.target.value}.`);
+});
+$("#assignThreadButton").addEventListener("click", () => {
+  const handle = normalizeHandle(window.prompt("Add a workflow owner by Threadline handle") || "");
+  if (!handle) return;
+  if (!isValidHandle(handle)) return toast("Owner handle must be 3-24 letters, numbers, or underscores.");
+  settings.contactProfiles ||= {};
+  settings.contactProfiles[handle] ||= { handle, name: handle, avatar: "" };
+  saveThreadWorkflow({ owner: handle });
+  renderSidebarData();
+  renderWorkflow();
+  toast(`Assigned to ${getContactName(handle)}.`);
 });
 $("#semanticSearch").addEventListener("input", (event) => {
   searchText = event.target.value.trim().toLowerCase();
@@ -1951,6 +2091,7 @@ $("#inlineAiButton").addEventListener("click", () => {
 });
 $("#sidebarNotificationsButton").addEventListener("click", openNotificationDialog);
 $("#sidebarProfileButton").addEventListener("click", () => $("#profileButton").click());
+$("#sidebarIdentityButton").addEventListener("click", () => $("#profileButton").click());
 $("#installHelpButton").addEventListener("click", () => openSettingsDialog($("#installDialog")));
 $("#clearReplyContextButton").addEventListener("click", clearReplyTarget);
 $("#markAllReadButton").addEventListener("click", (event) => {
