@@ -84,6 +84,10 @@ function encodePasscode(value) {
   return btoa(unescape(encodeURIComponent(String(value || ""))));
 }
 
+function keepDigitsOnly(event) {
+  event.target.value = event.target.value.replace(/\D/g, "");
+}
+
 function escapeHtml(value) {
   const el = document.createElement("div");
   el.textContent = String(value ?? "");
@@ -1193,6 +1197,10 @@ $("#profileForm").addEventListener("submit", async (event) => {
     return;
   }
   const passcode = $("#profilePasscode").value.trim();
+  if (passcode && !/^\d+$/.test(passcode)) {
+    toast("Passcode can only use digits 0-9.");
+    return;
+  }
   const recoveryEmail = $("#profileRecoveryEmail").value.trim().toLowerCase();
   const rememberMe = $("#profileRememberMe").checked;
   const passcodeHash = passcode ? encodePasscode(passcode) : settings.passcodeHash || "";
@@ -1228,6 +1236,8 @@ $("#profileAvatar").addEventListener("change", async (event) => {
     toast(error.message);
   }
 });
+$("#profilePasscode").addEventListener("input", keepDigitsOnly);
+$("#unlockCode").addEventListener("input", keepDigitsOnly);
 
 $("#saveGroupButton").addEventListener("click", async () => {
   if (!activeThread?.group) return;

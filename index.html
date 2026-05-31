@@ -301,7 +301,7 @@
         <label>Threadline handle<input id="profileHandle" required placeholder="example: ari" /></label>
         <label>Email<input id="profileEmail" type="email" placeholder="you@example.com" /></label>
         <label>Workspace<input id="profileWorkspace" placeholder="Workspace name" /></label>
-        <label>App passcode<input id="profilePasscode" type="password" placeholder="Optional device passcode" /></label>
+        <label>App passcode<input id="profilePasscode" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" placeholder="Optional digits-only passcode" /></label>
         <label>Recovery email<input id="profileRecoveryEmail" type="email" placeholder="you@example.com" /></label>
         <label class="remember-row"><input id="profileRememberMe" type="checkbox" /> Remember sign-in on this device</label>
         <div class="compose-dialog-actions">
@@ -377,7 +377,7 @@
       <form class="app-lock-card" id="unlockForm">
         <span class="eyebrow">Threadline</span>
         <h2>Enter passcode</h2>
-        <input id="unlockCode" type="password" autocomplete="current-password" placeholder="Passcode" />
+        <input id="unlockCode" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" placeholder="Digits-only passcode" />
         <button class="primary-action lock-enter-button" type="submit" id="unlockEnterButton">Enter</button>
         <button class="ghost-button" type="button" id="forgotPasscodeButton">Forgot passcode?</button>
         <div class="lock-recovery" id="lockRecovery" hidden>
