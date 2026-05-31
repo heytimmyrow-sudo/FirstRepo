@@ -1,7 +1,7 @@
 const APP_URL = "./";
 const ICON_URL = "./threadline-icon-192.png";
-const CACHE_NAME = "threadline-shell-v3";
-const APP_SHELL = ["./", "./index.html", "./styles.css?v=20260601-avatar", "./app.js?v=20260601-avatar", "./threadline.webmanifest", "./threadline-icon-192.png", "./threadline-icon-512.png"];
+const CACHE_NAME = "threadline-shell-v4";
+const APP_SHELL = ["./", "./index.html", "./styles.css?v=20260601-favorites", "./app.js?v=20260601-favorites", "./threadline.webmanifest", "./threadline-icon-192.png", "./threadline-icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));

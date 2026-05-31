@@ -1166,6 +1166,10 @@ function renderSidebarData() {
     ? contacts.map((contact) => `<button data-contact="${escapeHtml(contact)}">${renderAvatarMarkup(contact, "avatar-image contact-sidebar-avatar")}<span>${escapeHtml(getContactName(contact))}<br><small class="contact-presence">${escapeHtml(activeTypingHandle() === contact ? "Typing..." : "Available")}</small></span></button>`).join("")
     : `<span class="sidebar-empty">Contacts appear after you message someone</span>`;
   $("#contactsCount").textContent = String(contacts.length);
+  $("#favoritesList").innerHTML = favorites.length
+    ? favorites.map((contact) => `<button data-favorite-contact="${escapeHtml(contact)}">${renderAvatarMarkup(contact, "avatar-image contact-sidebar-avatar")}<span>${escapeHtml(getContactName(contact))}<br><small class="contact-presence">Favorite</small></span></button>`).join("")
+    : `<span class="sidebar-empty">Star contacts to keep them here</span>`;
+  $("#favoritesCount").textContent = String(favorites.length);
   lobby.querySelectorAll("[data-game-open]").forEach((button) => button.addEventListener("click", () => {
     const thread = threads.find((item) => item.gameId === button.dataset.gameOpen);
     if (thread) activeThread = thread;
@@ -1174,6 +1178,11 @@ function renderSidebarData() {
   }));
   $("#contactList").querySelectorAll("[data-contact]").forEach((button) => button.addEventListener("click", () => {
     $("#composeTo").value = button.dataset.contact;
+    openCompose();
+    setSidebarOpen(false);
+  }));
+  $("#favoritesList").querySelectorAll("[data-favorite-contact]").forEach((button) => button.addEventListener("click", () => {
+    $("#composeTo").value = button.dataset.favoriteContact;
     openCompose();
     setSidebarOpen(false);
   }));
@@ -1560,19 +1569,29 @@ $("#unlockCode").addEventListener("input", keepDigitsOnly);
 
 function renderContactsManager() {
   const contacts = getAllContacts().sort((a, b) => getContactName(a).localeCompare(getContactName(b)));
+  const favorites = getSettingList("favoriteHandles");
   $("#contactsManagerList").innerHTML = contacts.length
     ? contacts.map((handle) => `<div class="contact-manager-item">
         ${renderAvatarMarkup(handle)}
         <span><strong>${escapeHtml(getContactName(handle))}</strong><small>@${escapeHtml(handle)} · Available</small></span>
-        <button type="button" data-remove-contact="${escapeHtml(handle)}" title="Remove contact"><i data-lucide="trash-2"></i></button>
+        <button class="favorite-contact-toggle ${favorites.includes(handle) ? "active" : ""}" type="button" data-favorite-contact-toggle="${escapeHtml(handle)}" title="${favorites.includes(handle) ? "Remove from favorites" : "Add to favorites"}"><i data-lucide="star"></i></button>
+        <button class="remove-contact-button" type="button" data-remove-contact="${escapeHtml(handle)}" title="Remove contact"><i data-lucide="trash-2"></i></button>
       </div>`).join("")
     : `<p class="dialog-help">Add a contact to start building your people list.</p>`;
   $("#contactsManagerList").querySelectorAll("[data-remove-contact]").forEach((button) => button.addEventListener("click", () => {
     settings.contactProfiles ||= {};
     delete settings.contactProfiles[button.dataset.removeContact];
+    settings.favoriteHandles = getSettingList("favoriteHandles").filter((handle) => handle !== button.dataset.removeContact);
     saveSettings();
     renderContactsManager();
     renderSidebarData();
+  }));
+  $("#contactsManagerList").querySelectorAll("[data-favorite-contact-toggle]").forEach((button) => button.addEventListener("click", () => {
+    const handle = button.dataset.favoriteContactToggle;
+    const favorite = toggleSettingList("favoriteHandles", handle);
+    renderContactsManager();
+    renderSidebarData();
+    toast(favorite ? `${getContactName(handle)} added to favorites.` : `${getContactName(handle)} removed from favorites.`);
   }));
   if (window.lucide) window.lucide.createIcons();
 }

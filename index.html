@@ -10,7 +10,7 @@
     <link rel="manifest" href="threadline.webmanifest" />
     <link rel="apple-touch-icon" href="threadline-icon-180.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="threadline-icon-192.png" />
-    <link rel="stylesheet" href="styles.css?v=20260601-avatar" />
+    <link rel="stylesheet" href="styles.css?v=20260601-favorites" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
   </head>
   <body>
@@ -51,6 +51,10 @@
             <summary><span><i data-lucide="contact"></i> Contacts</span><b id="contactsCount">0</b></summary>
             <div id="contactList" class="side-tool-list"></div>
             <button class="sidebar-manage-button" id="manageContactsButton"><i data-lucide="contact-round"></i> Manage contacts</button>
+          </details>
+          <details class="side-tool" open>
+            <summary><span><i data-lucide="star"></i> Favorites</span><b id="favoritesCount">0</b></summary>
+            <div id="favoritesList" class="side-tool-list"></div>
           </details>
           <details class="side-tool">
             <summary><span><i data-lucide="settings-2"></i> Settings</span></summary>
@@ -440,6 +444,6 @@
     </section>
 
     <div class="toast" id="toast" role="status"></div>
-    <script src="app.js?v=20260601-avatar"></script>
+    <script src="app.js?v=20260601-favorites"></script>
   </body>
 </html>

@@ -1358,6 +1358,17 @@ svg {
 .contact-manager-item button {
   border: 0;
   background: transparent;
+}
+
+.contact-manager-item .favorite-contact-toggle {
+  color: var(--muted);
+}
+
+.contact-manager-item .favorite-contact-toggle.active {
+  color: var(--warn);
+}
+
+.contact-manager-item .remove-contact-button {
   color: var(--danger);
 }
 
