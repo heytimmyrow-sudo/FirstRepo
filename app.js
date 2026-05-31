@@ -1549,6 +1549,8 @@ $("#profileAvatar").addEventListener("change", async (event) => {
   try {
     pendingAvatar = await readAvatarDataUrl(event.target.files[0]);
     $("#avatarPreview").innerHTML = `<img src="${escapeHtml(pendingAvatar)}" alt="Profile preview" />`;
+    $("#profileMark").innerHTML = `<img class="avatar-image" src="${escapeHtml(pendingAvatar)}" alt="" />`;
+    toast("Picture ready. Press Save to keep it.");
   } catch (error) {
     toast(error.message);
   }
