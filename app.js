@@ -13,6 +13,7 @@ const GROUP_PREFIX = "THREADLINE_GROUP::";
 const MESSAGE_META_PREFIX = "THREADLINE_META::";
 const AI_HANDLE = "threadai";
 const DEFAULT_NOTIFICATIONS = { replies: true, mentions: true, followups: true, device: true };
+let appShortcut = new URLSearchParams(window.location.search).get("shortcut");
 const ICE_SERVERS = [
   { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
   { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" },
@@ -177,6 +178,13 @@ function unpackMessageBody(body) {
   }
 }
 
+function isVisibleMessageRow(row) {
+  if (getSettingList("blockedHandles").includes(row.sender_handle)) return false;
+  const grouped = unpackGroupBody(row.body);
+  const expiresAt = unpackMessageBody(grouped.body).meta.expiresAt;
+  return !expiresAt || new Date(expiresAt) > new Date();
+}
+
 function getSettingList(key) {
   return Array.isArray(settings[key]) ? settings[key] : [];
 }
@@ -284,6 +292,7 @@ async function sendConversationMessage(recipients, subject, body, options = {}) 
     id: options.group?.id || createGroupId(members, options.groupName || subject),
     name: String(options.group?.name || options.groupName || subject || "Group chat").trim().slice(0, 60),
     members,
+    admin: options.group?.admin || sender,
     messageId: createMessageId(),
   };
   await Promise.all(members.filter((handle) => handle !== sender).map((handle) => (
@@ -300,12 +309,7 @@ async function fetchMessages() {
     if (!response.ok) throw new Error();
     const rows = await response.json();
     const groups = new Map();
-    rows.filter((row) => {
-      if (getSettingList("blockedHandles").includes(row.sender_handle)) return false;
-      const grouped = unpackGroupBody(row.body);
-      const expiresAt = unpackMessageBody(grouped.body).meta.expiresAt;
-      return !expiresAt || new Date(expiresAt) > new Date();
-    }).forEach((row) => {
+    rows.filter(isVisibleMessageRow).forEach((row) => {
       const grouped = unpackGroupBody(row.body);
       const decodedMessage = unpackMessageBody(grouped.body);
       const other = row.sender_handle === handle ? row.recipient_handle : row.sender_handle;
@@ -363,7 +367,11 @@ async function fetchMessages() {
     await fetchTypingIndicators(handle);
     notifyNewUnread(rows, handle);
     activeThread = activeThread ? threads.find((thread) => thread.id === activeThread.id) || null : threads[0] || null;
-    if (new URLSearchParams(window.location.search).get("shortcut") === "unread") activeThread = threads.find((thread) => thread.unreadCount) || activeThread;
+    if (appShortcut === "unread") {
+      activeThread = threads.find((thread) => thread.unreadCount) || activeThread;
+      appShortcut = "";
+      window.history.replaceState({}, "", "./");
+    }
     render();
   } catch {
     toast("Could not refresh live messages.");
@@ -394,7 +402,7 @@ async function fetchTypingIndicators(handle) {
 }
 
 function notifyNewUnread(rows, handle) {
-  const incoming = rows.filter((row) => row.recipient_handle === handle && !row.read_at);
+  const incoming = rows.filter((row) => row.recipient_handle === handle && !row.read_at && isVisibleMessageRow(row));
   const fresh = incoming.filter((row) => !knownUnreadIds.has(row.id));
   knownUnreadIds = new Set(incoming.map((row) => row.id));
   if (initialMessageFetch) {
@@ -883,6 +891,9 @@ function renderThreads() {
       quotesCleaned = false;
       topicsSplit = false;
       showAllMessages = false;
+      conversationSearch = "";
+      $("#conversationSearch").value = "";
+      clearReplyTarget();
       markThreadRead(activeThread);
       render();
     });
@@ -1000,7 +1011,11 @@ async function patchMessageBody(message, nextBody) {
   const grouped = unpackGroupBody(message.rawBody);
   const packed = packMessageBody(nextBody, message.meta);
   const body = grouped.group ? packGroupBody(packed, grouped.group) : packed;
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}?id=eq.${encodeURIComponent(message.rowId)}`, {
+  const matchingRows = grouped.group?.messageId
+    ? activeThread.rows.filter((row) => row.group?.messageId === grouped.group.messageId)
+    : [];
+  const ids = [...new Set([message.rowId, ...matchingRows.map((row) => row.id)])].map(encodeURIComponent).join(",");
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}?id=in.(${ids})`, {
     method: "PATCH",
     headers: getHeaders({ "Content-Type": "application/json", Prefer: "return=minimal" }),
     body: JSON.stringify({ body }),
@@ -1050,7 +1065,7 @@ function renderGroupInfo() {
   $("#groupMembersInput").value = "";
   $("#groupRemoveMembersInput").value = "";
   $("#muteGroupToggle").checked = getSettingList("mutedGroupIds").includes(activeThread.group.id);
-  $("#groupMemberList").textContent = `Admin: ${activeThread.group.members[0]}. Members: ${activeThread.group.members.join(", ")}`;
+  $("#groupMemberList").textContent = `Admin: ${activeThread.group.admin || activeThread.group.members[0]}. Members: ${activeThread.group.members.join(", ")}`;
 }
 
 function renderPrivacyControls() {
@@ -1473,7 +1488,9 @@ $("#saveGroupButton").addEventListener("click", async () => {
   if (!activeThread?.group) return;
   const me = settings.profile.handle;
   const removeMembers = parseRecipients($("#groupRemoveMembersInput").value);
-  if (removeMembers.length && activeThread.group.members[0] !== me) return toast("Only the group admin can remove members.");
+  const admin = activeThread.group.admin || activeThread.group.members[0];
+  if (removeMembers.length && admin !== me) return toast("Only the group admin can remove members.");
+  if (removeMembers.includes(admin)) return toast("The group admin should use Leave instead.");
   const members = [...new Set([...activeThread.group.members, ...parseRecipients($("#groupMembersInput").value)])].filter((member) => !removeMembers.includes(member));
   const group = { ...activeThread.group, name: $("#groupNameInput").value.trim() || activeThread.group.name, members };
   try {
@@ -1486,7 +1503,7 @@ $("#leaveGroupButton").addEventListener("click", async () => {
   if (!activeThread?.group) return;
   const members = activeThread.group.members.filter((member) => member !== settings.profile.handle);
   try {
-    const group = { ...activeThread.group, members, messageId: createMessageId() };
+    const group = { ...activeThread.group, members, admin: activeThread.group.admin === settings.profile.handle ? members[0] || "" : activeThread.group.admin, messageId: createMessageId() };
     await Promise.all(members.map((member) => sendRemoteMessage(member, activeThread.title, packGroupBody(`${settings.profile.handle} left the group.`, group))));
     activeThread = null;
     toast("You left the group.");
@@ -1945,6 +1962,9 @@ $("#unreadNotificationStrip").addEventListener("click", () => {
   if (!thread) return;
   activeThread = thread;
   showAllMessages = false;
+  conversationSearch = "";
+  $("#conversationSearch").value = "";
+  clearReplyTarget();
   markThreadRead(thread);
   render();
   document.querySelector(".reader-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1959,6 +1979,9 @@ fetchMessages();
 window.setInterval(fetchMessages, 15000);
 window.setInterval(pollCalls, 2500);
 
-const shortcut = new URLSearchParams(window.location.search).get("shortcut");
-if (shortcut === "compose") openCompose();
-if (shortcut === "ai") openSettingsDialog($("#aiDialog"));
+if (appShortcut === "compose") openCompose();
+if (appShortcut === "ai") openSettingsDialog($("#aiDialog"));
+if (["compose", "ai"].includes(appShortcut)) {
+  appShortcut = "";
+  window.history.replaceState({}, "", "./");
+}
