@@ -35,6 +35,8 @@ let serviceWorkerRegistration = null;
 let voiceStartedAt = 0;
 let voiceTimer = null;
 let cancelVoiceNote = false;
+let voiceWaveAudio = null;
+let voiceWaveFrame = 0;
 let pendingAvatar = "";
 let loggedCallIds = new Set();
 
@@ -1448,6 +1450,36 @@ function readFileAsDataUrl(file, maxBytes) {
   });
 }
 
+function startVoiceWaveform(stream) {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  const waveform = $("#voiceWaveform");
+  waveform.innerHTML = Array.from({ length: 20 }, () => "<span></span>").join("");
+  if (!AudioContext) return;
+  voiceWaveAudio = new AudioContext();
+  const analyser = voiceWaveAudio.createAnalyser();
+  analyser.fftSize = 64;
+  voiceWaveAudio.createMediaStreamSource(stream).connect(analyser);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  const bars = [...waveform.children];
+  const draw = () => {
+    analyser.getByteFrequencyData(data);
+    bars.forEach((bar, index) => {
+      const level = data[index % data.length] || 0;
+      bar.style.height = `${Math.max(2, Math.round((level / 255) * 24))}px`;
+    });
+    voiceWaveFrame = window.requestAnimationFrame(draw);
+  };
+  draw();
+}
+
+function stopVoiceWaveform() {
+  window.cancelAnimationFrame(voiceWaveFrame);
+  voiceWaveFrame = 0;
+  voiceWaveAudio?.close?.();
+  voiceWaveAudio = null;
+  $("#voiceWaveform").innerHTML = "";
+}
+
 async function sendAttachment(prefix, payload, label) {
   if (!activeThread) return toast("Open a conversation first.");
   try {
@@ -1491,6 +1523,7 @@ $("#voiceNoteButton").addEventListener("click", async () => {
       window.clearInterval(voiceTimer);
       voiceTimer = null;
       $("#recordingStrip").hidden = true;
+      stopVoiceWaveform();
       stream.getTracks().forEach((track) => track.stop());
       $("#voiceNoteButton").classList.remove("active");
       if (cancelVoiceNote) return;
@@ -1501,6 +1534,7 @@ $("#voiceNoteButton").addEventListener("click", async () => {
     };
     cancelVoiceNote = false;
     voiceStartedAt = Date.now();
+    startVoiceWaveform(stream);
     $("#recordingStrip").hidden = false;
     $("#recordingTime").textContent = "0:00";
     voiceTimer = window.setInterval(() => {
