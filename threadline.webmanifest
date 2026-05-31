@@ -5,6 +5,26 @@
   "display": "standalone",
   "background_color": "#101419",
   "theme_color": "#101419",
+  "shortcuts": [
+    {
+      "name": "New message",
+      "short_name": "Compose",
+      "url": "./?shortcut=compose",
+      "icons": [{ "src": "threadline-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Unread chats",
+      "short_name": "Unread",
+      "url": "./?shortcut=unread",
+      "icons": [{ "src": "threadline-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "ThreadAI",
+      "short_name": "ThreadAI",
+      "url": "./?shortcut=ai",
+      "icons": [{ "src": "threadline-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ],
   "icons": [
     {
       "src": "threadline-icon-192.png",

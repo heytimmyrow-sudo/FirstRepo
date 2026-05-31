@@ -10,6 +10,7 @@ const PHOTO_PREFIX = "THREADMAIL_PHOTO::";
 const FILE_PREFIX = "THREADLINE_FILE::";
 const CALL_LOG_PREFIX = "THREADLINE_CALL_LOG::";
 const GROUP_PREFIX = "THREADLINE_GROUP::";
+const MESSAGE_META_PREFIX = "THREADLINE_META::";
 const AI_HANDLE = "threadai";
 const DEFAULT_NOTIFICATIONS = { replies: true, mentions: true, followups: true, device: true };
 const ICE_SERVERS = [
@@ -40,6 +41,10 @@ let voiceWaveAudio = null;
 let voiceWaveFrame = 0;
 let pendingAvatar = "";
 let loggedCallIds = new Set();
+let replyTarget = null;
+let conversationSearch = "";
+let pausedVoiceMs = 0;
+let voicePausedAt = 0;
 
 let activeThread = null;
 let quotesCleaned = false;
@@ -157,6 +162,69 @@ function unpackGroupBody(body) {
   }
 }
 
+function packMessageBody(body, meta = {}) {
+  const usefulMeta = Object.fromEntries(Object.entries(meta).filter(([, value]) => value));
+  return Object.keys(usefulMeta).length ? `${MESSAGE_META_PREFIX}${JSON.stringify(usefulMeta)}\n${body}` : body;
+}
+
+function unpackMessageBody(body) {
+  if (!String(body || "").startsWith(MESSAGE_META_PREFIX)) return { body: String(body || ""), meta: {} };
+  const [meta, ...rest] = String(body).slice(MESSAGE_META_PREFIX.length).split("\n");
+  try {
+    return { body: rest.join("\n"), meta: JSON.parse(meta) };
+  } catch {
+    return { body: String(body || ""), meta: {} };
+  }
+}
+
+function getSettingList(key) {
+  return Array.isArray(settings[key]) ? settings[key] : [];
+}
+
+function toggleSettingList(key, value) {
+  const values = new Set(getSettingList(key));
+  if (values.has(value)) values.delete(value);
+  else values.add(value);
+  settings[key] = [...values];
+  saveSettings();
+  return values.has(value);
+}
+
+function getOutgoingQueue() {
+  try {
+    return JSON.parse(localStorage.getItem("threadlineOutgoingQueue") || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveOutgoingQueue(queue) {
+  localStorage.setItem("threadlineOutgoingQueue", JSON.stringify(queue));
+}
+
+async function flushOutgoingQueue() {
+  const queue = getOutgoingQueue();
+  if (!queue.length || !navigator.onLine) return;
+  const remaining = [];
+  for (const message of queue) {
+    try {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}`, {
+        method: "POST",
+        headers: getHeaders({ "Content-Type": "application/json", Prefer: "return=representation" }),
+        body: JSON.stringify([message]),
+      });
+      if (!response.ok) remaining.push(message);
+    } catch {
+      remaining.push(message);
+    }
+  }
+  saveOutgoingQueue(remaining);
+  if (remaining.length !== queue.length) {
+    toast(remaining.length ? "Some queued messages are still waiting to send." : "Queued messages sent.");
+    fetchMessages();
+  }
+}
+
 async function createGame(sender, recipient, type) {
   const board = type === "connect_four"
     ? Array(42).fill("")
@@ -184,12 +252,19 @@ async function sendRemoteMessage(recipient, subject, body, options = {}) {
   const message = { sender_handle: sender, recipient_handle: normalizedRecipient, subject, body };
   if (gameId) message.game_id = gameId;
   if (options.gameId) message.game_id = options.gameId;
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}`, {
-    method: "POST",
-    headers: getHeaders({ "Content-Type": "application/json", Prefer: "return=representation" }),
-    body: JSON.stringify([message]),
-  });
-  if (!response.ok) throw new Error("Message could not be sent. Check your connection and try again.");
+  try {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}`, {
+      method: "POST",
+      headers: getHeaders({ "Content-Type": "application/json", Prefer: "return=representation" }),
+      body: JSON.stringify([message]),
+    });
+    if (!response.ok) throw new Error();
+  } catch {
+    const queue = getOutgoingQueue();
+    queue.push(message);
+    saveOutgoingQueue(queue);
+    toast("Offline: message queued and will send when you reconnect.");
+  }
 }
 
 async function sendConversationMessage(recipients, subject, body, options = {}) {
@@ -197,7 +272,12 @@ async function sendConversationMessage(recipients, subject, body, options = {}) 
   const handles = [...new Set((Array.isArray(recipients) ? recipients : parseRecipients(recipients)).map(normalizeHandle).filter((handle) => handle && handle !== sender))];
   if (!handles.length) throw new Error("Add at least one other person's handle.");
   if (handles.some((handle) => !isValidHandle(handle))) throw new Error("Use valid 3-24 character handles separated by commas.");
-  if (handles.length === 1 && !options.group) return sendRemoteMessage(handles[0], subject, body, options);
+  if (handles.length === 1 && !options.group) {
+    const disappearing = getSettingList("disappearingHandles").includes(handles[0]);
+    const decoded = unpackMessageBody(body);
+    const directBody = disappearing ? packMessageBody(decoded.body, { ...decoded.meta, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }) : body;
+    return sendRemoteMessage(handles[0], subject, directBody, options);
+  }
   if (options.gameType) throw new Error("Games are currently for two-person conversations.");
   const members = [...new Set([sender, ...(options.group?.members || []), ...handles])].sort();
   const group = {
@@ -220,12 +300,18 @@ async function fetchMessages() {
     if (!response.ok) throw new Error();
     const rows = await response.json();
     const groups = new Map();
-    rows.forEach((row) => {
+    rows.filter((row) => {
+      if (getSettingList("blockedHandles").includes(row.sender_handle)) return false;
       const grouped = unpackGroupBody(row.body);
+      const expiresAt = unpackMessageBody(grouped.body).meta.expiresAt;
+      return !expiresAt || new Date(expiresAt) > new Date();
+    }).forEach((row) => {
+      const grouped = unpackGroupBody(row.body);
+      const decodedMessage = unpackMessageBody(grouped.body);
       const other = row.sender_handle === handle ? row.recipient_handle : row.sender_handle;
       const key = grouped.group?.id ? `group:${grouped.group.id}` : `${other}|${row.subject}`;
       if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push({ ...row, group: grouped.group, display_body: grouped.body });
+      groups.get(key).push({ ...row, group: grouped.group, display_body: decodedMessage.body, message_meta: decodedMessage.meta });
     });
     threads = [...groups.entries()].map(([key, rows]) => {
       rows.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
@@ -261,11 +347,14 @@ async function fetchMessages() {
           const game = unpacked.game ? `\n\nGame invite: ${getGameTitle(unpacked.game)}` : "";
           return {
             sender: row.sender_handle === handle ? "You" : row.sender_handle,
+            rowId: row.id,
             time: new Date(row.created_at).toLocaleString(),
             body: `${unpacked.body}${game}`,
             topic: unpacked.game ? "Game" : "Message",
             mine: row.sender_handle === handle,
             readAt: row.read_at,
+            meta: row.message_meta || {},
+            rawBody: row.body,
           };
         }),
       };
@@ -274,6 +363,7 @@ async function fetchMessages() {
     await fetchTypingIndicators(handle);
     notifyNewUnread(rows, handle);
     activeThread = activeThread ? threads.find((thread) => thread.id === activeThread.id) || null : threads[0] || null;
+    if (new URLSearchParams(window.location.search).get("shortcut") === "unread") activeThread = threads.find((thread) => thread.unreadCount) || activeThread;
     render();
   } catch {
     toast("Could not refresh live messages.");
@@ -312,9 +402,14 @@ function notifyNewUnread(rows, handle) {
     return;
   }
   if (!fresh.length) return;
+  const audibleFresh = fresh.filter((row) => {
+    const group = unpackGroupBody(row.body).group;
+    return !group?.id || !getSettingList("mutedGroupIds").includes(group.id);
+  });
+  if (!audibleFresh.length) return;
   playMessageChime();
   if (!settings.notifications?.device || !("Notification" in window) || Notification.permission !== "granted") return;
-  const row = fresh[0];
+  const row = audibleFresh[0];
   const notificationBody = unpackGroupBody(row.body).body;
   const unreadCount = getUnreadCount();
   const options = { body: `${row.sender_handle}: ${row.subject || notificationBody.slice(0, 80)}`, icon: "threadline-icon-192.png", badge: "threadline-icon-192.png", tag: "threadline-unread", renotify: true, data: { url: "./" } };
@@ -343,6 +438,7 @@ function updateUnreadNotification() {
   $("#unreadNotificationStrip").hidden = !unreadCount;
   $("#unreadNotificationCount").textContent = String(unreadCount);
   $("#unreadNotificationText").textContent = unreadCount === 1 ? "You have 1 unread message." : `You have ${unreadCount} unread messages.`;
+  $("#markAllReadButton").hidden = !unreadCount;
   updateAppBadge(unreadCount);
 }
 
@@ -382,6 +478,7 @@ function showCallPanel({ label = "Threadline call", status = "Connecting...", in
   $("#acceptCallButton").hidden = !incoming;
   $("#enableRingButton").hidden = !incoming || ringtoneUnlocked;
   $("#muteCallButton").hidden = !connected;
+  $("#cameraCallButton").hidden = !connected || !video;
 }
 
 function hideCallPanel() {
@@ -462,6 +559,11 @@ function notifyIncomingCall(call) {
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   try {
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (sessionStorage.getItem("threadlineWorkerReloaded") === "1") return;
+      sessionStorage.setItem("threadlineWorkerReloaded", "1");
+      window.location.reload();
+    });
     serviceWorkerRegistration = await navigator.serviceWorker.register("./threadline-sw.js", { updateViaCache: "none" });
     await navigator.serviceWorker.ready;
   } catch {
@@ -534,7 +636,13 @@ async function createCallPeer(role, call) {
     }
   });
   peer.addEventListener("connectionstatechange", () => {
-    const status = peer.connectionState === "connected" ? "Connected" : peer.connectionState === "disconnected" ? "Reconnecting..." : "Connecting...";
+    const status = peer.connectionState === "connected"
+      ? "Connected"
+      : peer.connectionState === "disconnected"
+        ? "Reconnecting..."
+        : ["failed", "closed"].includes(peer.connectionState)
+          ? "Call connection ended"
+          : "Connecting...";
     showCallPanel({ label: `${mediaType === "video" ? "FaceTime" : "Voice call"} with ${getCallPeer()}`, status, connected: true, video: mediaType === "video" });
   });
   return { peer, stream };
@@ -641,6 +749,16 @@ function toggleCallMute() {
   $("#muteCallButton span").textContent = callSession.muted ? "Unmute" : "Mute";
 }
 
+function toggleCallCamera() {
+  if (!callSession?.stream) return;
+  const tracks = callSession.stream.getVideoTracks();
+  if (!tracks.length) return toast("No camera is active for this call.");
+  callSession.cameraDisabled = !callSession.cameraDisabled;
+  tracks.forEach((track) => { track.enabled = !callSession.cameraDisabled; });
+  $("#cameraCallButton span").textContent = callSession.cameraDisabled ? "Camera on" : "Camera off";
+  toast(callSession.cameraDisabled ? "Camera turned off." : "Camera turned on.");
+}
+
 function endLocalCall() {
   stopIncomingRingtone();
   callSession?.stream?.getTracks().forEach((track) => track.stop());
@@ -724,7 +842,7 @@ function renderThreads() {
     return;
   }
   const filteredThreads = threads.filter((thread) => {
-    const matchesSearch = !searchText || `${thread.title} ${thread.summary} ${thread.people}`.toLowerCase().includes(searchText);
+    const matchesSearch = !searchText || `${thread.title} ${thread.summary} ${thread.people} ${thread.messages.map((message) => message.body).join(" ")}`.toLowerCase().includes(searchText);
     const matchesFilter = threadFilter === "All"
       || (threadFilter === "Sender" && thread.people)
       || (threadFilter === "Project" && thread.title.toLowerCase().includes("project"))
@@ -742,7 +860,7 @@ function renderThreads() {
     .map(
       (thread) => `
         <button class="thread-card ${thread.id === activeThread?.id ? "active" : ""}" data-id="${escapeHtml(thread.id)}">
-          <strong>${escapeHtml(thread.title)}</strong>
+          <strong>${getSettingList("favoriteHandles").some((handle) => thread.recipients.includes(handle)) ? "★ " : ""}${escapeHtml(thread.title)}</strong>
           ${thread.unreadCount ? `<b class="unread-badge">${thread.unreadCount}</b>` : ""}
           <span>${escapeHtml(thread.summary)}</span>
           <span class="thread-meta"><span>${escapeHtml(thread.people)}</span><span>${escapeHtml(thread.urgency)}</span></span>
@@ -777,15 +895,24 @@ function renderThreads() {
 
 function renderMessages() {
   const stack = $("#messageStack");
-  const shouldCollapseThread = activeThread.messages.length >= 4;
+  const matchingIndexes = activeThread.messages
+    .map((message, index) => ({ message, index }))
+    .filter(({ message }) => !conversationSearch || `${message.sender} ${message.body}`.toLowerCase().includes(conversationSearch))
+    .map(({ index }) => index);
+  if (!matchingIndexes.length) {
+    stack.innerHTML = `<div class="thread-list-empty"><i data-lucide="search-x"></i><strong>No matching messages</strong><span>Try another word or phrase.</span></div>`;
+    return;
+  }
+  const shouldCollapseThread = !conversationSearch && matchingIndexes.length >= 4;
   const visibleIndexes = showAllMessages || !shouldCollapseThread
-    ? activeThread.messages.map((_, index) => index)
-    : [0, 1, activeThread.messages.length - 1];
-  const hiddenCount = activeThread.messages.length - visibleIndexes.length;
+    ? matchingIndexes
+    : [matchingIndexes[0], matchingIndexes[1], matchingIndexes.at(-1)];
+  const hiddenCount = matchingIndexes.length - visibleIndexes.length;
 
   const renderMessage = (index) => {
-      const { sender, time, body, topic, mine, readAt } = activeThread.messages[index];
+      const { sender, rowId, time, body, topic, mine, readAt, meta } = activeThread.messages[index];
       const cleanBody = quotesCleaned ? body.replace(/>.*$/, "").trim() : body;
+      const reactions = settings.messageReactions?.[rowId] || [];
       return `
         <article class="message ${mine ? "from-me" : "from-them"}" data-index="${index}">
           <div class="message-head">
@@ -796,7 +923,16 @@ function renderMessages() {
             <button class="collapse-button">${index === 0 ? "Collapse" : "Expand"}</button>
           </div>
           ${topicsSplit ? `<span class="topic-tag">${escapeHtml(topic)}</span>` : ""}
+          ${meta.replyText ? `<div class="reply-quote"><strong>${escapeHtml(meta.replySender || "Message")}</strong><br>${escapeHtml(meta.replyText)}</div>` : ""}
           ${renderMessageBody(cleanBody)}
+          ${meta.edited ? `<span class="message-receipt">Edited</span>` : ""}
+          <div class="reaction-row">
+            ${["👍", "❤️", "😂", "✅"].map((reaction) => `<button class="${reactions.includes(reaction) ? "active" : ""}" data-reaction="${reaction}" data-row-id="${escapeHtml(rowId)}">${reaction}</button>`).join("")}
+          </div>
+          <div class="message-controls">
+            <button data-message-action="reply" data-index="${index}"><i data-lucide="reply"></i> Reply</button>
+            ${mine ? `<button data-message-action="edit" data-index="${index}"><i data-lucide="pencil"></i> Edit</button><button data-message-action="delete" data-index="${index}"><i data-lucide="trash-2"></i> Delete</button>` : ""}
+          </div>
           ${mine ? `<span class="message-receipt">${readAt ? "Read" : "Sent"}</span>` : ""}
         </article>
       `;
@@ -827,6 +963,9 @@ function renderMessages() {
     showAllMessages = !showAllMessages;
     renderMessages();
   });
+  stack.querySelectorAll("[data-reaction]").forEach((button) => button.addEventListener("click", () => toggleMessageReaction(button.dataset.rowId, button.dataset.reaction)));
+  stack.querySelectorAll("[data-message-action]").forEach((button) => button.addEventListener("click", () => handleMessageAction(button.dataset.messageAction, Number(button.dataset.index))));
+  if (window.lucide) window.lucide.createIcons();
 }
 
 function renderMessageBody(body) {
@@ -835,10 +974,66 @@ function renderMessageBody(body) {
   const photo = parsePrefixedJson(body, PHOTO_PREFIX);
   if (photo?.url) return `<div class="message-media"><img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.name || "Sent photo")}" /><span>${escapeHtml(photo.name || "Photo")}</span></div>`;
   const voice = parsePrefixedJson(body, VOICE_NOTE_PREFIX);
-  if (voice?.url) return `<div class="message-media"><audio controls src="${escapeHtml(voice.url)}"></audio><span>Voice note</span></div>`;
+  if (voice?.url) return `<div class="message-media"><audio controls src="${escapeHtml(voice.url)}"></audio><span>Voice note</span><div class="reaction-row"><button data-voice-speed="1">1x</button><button data-voice-speed="1.5">1.5x</button><button data-voice-speed="2">2x</button></div></div>`;
   const file = parsePrefixedJson(body, FILE_PREFIX);
   if (file?.url) return `<div class="message-media"><a class="ghost-button" href="${escapeHtml(file.url)}" download="${escapeHtml(file.name || "download")}"><i data-lucide="download"></i> ${escapeHtml(file.name || "Download file")}</a></div>`;
   return `<p class="message-body ${body.includes(">") && !quotesCleaned ? "quote" : ""}">${escapeHtml(body)}</p>`;
+}
+
+function toggleMessageReaction(rowId, reaction) {
+  settings.messageReactions ||= {};
+  const reactions = new Set(settings.messageReactions[rowId] || []);
+  if (reactions.has(reaction)) reactions.delete(reaction);
+  else reactions.add(reaction);
+  settings.messageReactions[rowId] = [...reactions];
+  saveSettings();
+  renderMessages();
+}
+
+function clearReplyTarget() {
+  replyTarget = null;
+  $("#replyContext").hidden = true;
+  $("#replyContextText").textContent = "";
+}
+
+async function patchMessageBody(message, nextBody) {
+  const grouped = unpackGroupBody(message.rawBody);
+  const packed = packMessageBody(nextBody, message.meta);
+  const body = grouped.group ? packGroupBody(packed, grouped.group) : packed;
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}?id=eq.${encodeURIComponent(message.rowId)}`, {
+    method: "PATCH",
+    headers: getHeaders({ "Content-Type": "application/json", Prefer: "return=minimal" }),
+    body: JSON.stringify({ body }),
+  });
+  if (!response.ok) throw new Error();
+}
+
+async function handleMessageAction(action, index) {
+  const message = activeThread?.messages[index];
+  if (!message) return;
+  if (action === "reply") {
+    replyTarget = { sender: message.sender, text: message.body.slice(0, 120) };
+    $("#replyContextText").textContent = `Replying to ${replyTarget.sender}: ${replyTarget.text}`;
+    $("#replyContext").hidden = false;
+    $("#replyBox").focus();
+    return;
+  }
+  if (!message.mine) return;
+  try {
+    if (action === "edit") {
+      const nextBody = window.prompt("Edit message", message.body);
+      if (!nextBody?.trim() || nextBody.trim() === message.body) return;
+      message.meta.edited = true;
+      await patchMessageBody(message, nextBody.trim());
+      toast("Message edited.");
+    } else if (action === "delete" && window.confirm("Delete this message?")) {
+      await patchMessageBody(message, "Message deleted.");
+      toast("Message deleted.");
+    }
+    await fetchMessages();
+  } catch {
+    toast("Message could not be updated. Check your connection.");
+  }
 }
 
 function renderActions() {
@@ -853,7 +1048,22 @@ function renderGroupInfo() {
   if (!activeThread?.group) return;
   $("#groupNameInput").value = activeThread.group.name;
   $("#groupMembersInput").value = "";
-  $("#groupMemberList").textContent = `Members: ${activeThread.group.members.join(", ")}`;
+  $("#groupRemoveMembersInput").value = "";
+  $("#muteGroupToggle").checked = getSettingList("mutedGroupIds").includes(activeThread.group.id);
+  $("#groupMemberList").textContent = `Admin: ${activeThread.group.members[0]}. Members: ${activeThread.group.members.join(", ")}`;
+}
+
+function renderPrivacyControls() {
+  const section = $("#contactPrivacySection");
+  const contact = activeThread?.group ? "" : activeThread?.recipients?.[0] || "";
+  section.hidden = !contact;
+  if (!contact) return;
+  const favorite = getSettingList("favoriteHandles").includes(contact);
+  const blocked = getSettingList("blockedHandles").includes(contact);
+  $("#disappearingMessagesToggle").checked = getSettingList("disappearingHandles").includes(contact);
+  $("#favoriteContactButton").innerHTML = `<i data-lucide="star"></i> ${favorite ? "Unfavorite" : "Favorite"}`;
+  $("#blockContactButton").innerHTML = `<i data-lucide="ban"></i> ${blocked ? "Unblock" : "Block"}`;
+  $("#privacyStatus").textContent = blocked ? `${contact} is blocked. New incoming messages are hidden.` : favorite ? `${contact} is saved as a favorite.` : "";
 }
 
 function activeTypingHandle() {
@@ -870,9 +1080,10 @@ function renderSidebarData() {
       }).join("")
     : `<span class="sidebar-empty">No active games yet</span>`;
   $("#gameLobbyCount").textContent = String(gameRows.length);
-  const contacts = [...new Set(threads.flatMap((thread) => thread.recipients || [thread.people]))].filter(Boolean);
+  const favorites = getSettingList("favoriteHandles");
+  const contacts = [...new Set(threads.flatMap((thread) => thread.recipients || [thread.people]))].filter(Boolean).sort((a, b) => Number(favorites.includes(b)) - Number(favorites.includes(a)) || a.localeCompare(b));
   $("#contactList").innerHTML = contacts.length
-    ? contacts.map((contact) => `<button data-contact="${escapeHtml(contact)}"><i data-lucide="user-round"></i> ${escapeHtml(contact)}</button>`).join("")
+    ? contacts.map((contact) => `<button data-contact="${escapeHtml(contact)}"><i data-lucide="${favorites.includes(contact) ? "star" : "user-round"}"></i> ${escapeHtml(contact)}</button>`).join("")
     : `<span class="sidebar-empty">Contacts appear after you message someone</span>`;
   $("#contactsCount").textContent = String(contacts.length);
   lobby.querySelectorAll("[data-game-open]").forEach((button) => button.addEventListener("click", () => {
@@ -905,6 +1116,13 @@ async function markThreadRead(thread) {
   } catch {
     toast("Opened locally. Read receipt will retry later.");
   }
+}
+
+async function markAllThreadsRead() {
+  const unreadThreads = threads.filter((thread) => thread.unreadCount);
+  await Promise.all(unreadThreads.map(markThreadRead));
+  render();
+  toast("All messages marked as read.");
 }
 
 function renderGameBoard() {
@@ -1019,11 +1237,14 @@ function renderReader() {
     $("#summaryText").textContent = "";
     $("#messageStack").innerHTML = "";
     $("#actionItems").innerHTML = "";
+    $("#contactPrivacySection").hidden = true;
+    $("#groupInfoSection").hidden = true;
     return;
   }
   $("#threadTitle").textContent = activeThread.title;
   $("#threadSubtitle").textContent = `${activeThread.group ? `Group with ${activeThread.people}` : activeThread.people} · ${activeThread.messages.length} message${activeThread.messages.length === 1 ? "" : "s"} · read receipt ${activeThread.receipt}`;
-  $("#threadLabels").textContent = activeThread.labels;
+  const groupAvatar = activeThread.group && settings.groupAvatars?.[activeThread.group.id];
+  $("#threadLabels").innerHTML = `${groupAvatar ? `<img class="group-avatar-small" src="${escapeHtml(groupAvatar)}" alt="" /> ` : ""}${escapeHtml(activeThread.labels)}`;
   $("#detailPresence").textContent = activeTypingHandle() ? `${activeTypingHandle()} is typing...` : "Live conversation";
   $("#summaryText").textContent = activeThread.summary;
   const status = $("#threadStatus");
@@ -1036,6 +1257,7 @@ function renderReader() {
   renderActions();
   renderGameBoard();
   renderGroupInfo();
+  renderPrivacyControls();
 }
 
 function render() {
@@ -1064,6 +1286,14 @@ document.addEventListener("click", (event) => {
   if (button && activeThread) aiAction(button.dataset.action);
   const callback = event.target.closest(".call-back-button");
   if (callback) startCall(callback.dataset.callType === "video" ? "video" : "voice");
+  const speed = event.target.closest("[data-voice-speed]");
+  if (speed) {
+    const audio = speed.closest(".message-media")?.querySelector("audio");
+    if (audio) {
+      audio.playbackRate = Number(speed.dataset.voiceSpeed);
+      toast(`Voice note speed: ${speed.dataset.voiceSpeed}x`);
+    }
+  }
 });
 
 $("#themeToggle").addEventListener("change", (event) => {
@@ -1241,7 +1471,10 @@ $("#unlockCode").addEventListener("input", keepDigitsOnly);
 
 $("#saveGroupButton").addEventListener("click", async () => {
   if (!activeThread?.group) return;
-  const members = [...new Set([...activeThread.group.members, ...parseRecipients($("#groupMembersInput").value)])];
+  const me = settings.profile.handle;
+  const removeMembers = parseRecipients($("#groupRemoveMembersInput").value);
+  if (removeMembers.length && activeThread.group.members[0] !== me) return toast("Only the group admin can remove members.");
+  const members = [...new Set([...activeThread.group.members, ...parseRecipients($("#groupMembersInput").value)])].filter((member) => !removeMembers.includes(member));
   const group = { ...activeThread.group, name: $("#groupNameInput").value.trim() || activeThread.group.name, members };
   try {
     await sendConversationMessage(members, activeThread.title, `Group updated by ${settings.profile.handle}.`, { group });
@@ -1259,6 +1492,43 @@ $("#leaveGroupButton").addEventListener("click", async () => {
     toast("You left the group.");
     await fetchMessages();
   } catch (error) { toast(error.message); }
+});
+$("#muteGroupToggle").addEventListener("change", (event) => {
+  if (!activeThread?.group) return;
+  const muted = toggleSettingList("mutedGroupIds", activeThread.group.id);
+  event.target.checked = muted;
+  toast(muted ? "Group notifications muted." : "Group notifications enabled.");
+});
+$("#groupAvatarInput").addEventListener("change", async (event) => {
+  if (!activeThread?.group || !event.target.files[0]) return;
+  try {
+    settings.groupAvatars ||= {};
+    settings.groupAvatars[activeThread.group.id] = await readFileAsDataUrl(event.target.files[0], 300 * 1024);
+    saveSettings();
+    toast("Group picture saved on this device.");
+  } catch (error) {
+    toast(error.message);
+  }
+});
+$("#favoriteContactButton").addEventListener("click", () => {
+  const contact = activeThread?.group ? "" : activeThread?.recipients?.[0] || "";
+  if (!contact) return;
+  toast(toggleSettingList("favoriteHandles", contact) ? `${contact} added to favorites.` : `${contact} removed from favorites.`);
+  render();
+});
+$("#blockContactButton").addEventListener("click", () => {
+  const contact = activeThread?.group ? "" : activeThread?.recipients?.[0] || "";
+  if (!contact) return;
+  const blocked = toggleSettingList("blockedHandles", contact);
+  toast(blocked ? `${contact} blocked.` : `${contact} unblocked.`);
+  fetchMessages();
+});
+$("#disappearingMessagesToggle").addEventListener("change", (event) => {
+  const contact = activeThread?.group ? "" : activeThread?.recipients?.[0] || "";
+  if (!contact) return;
+  const enabled = toggleSettingList("disappearingHandles", contact);
+  event.target.checked = enabled;
+  toast(enabled ? "New messages in this chat will disappear after 24 hours." : "Disappearing messages turned off.");
 });
 
 function openNotificationDialog() {
@@ -1350,8 +1620,10 @@ document.querySelectorAll("[data-game]").forEach((button) => {
 $("#sendReplyButton").addEventListener("click", async () => {
   if (!activeThread || !$("#replyBox").value.trim()) return;
   try {
-    await sendConversationMessage(activeThread.recipients, activeThread.title, $("#replyBox").value.trim(), { group: activeThread.group });
+    const body = packMessageBody($("#replyBox").value.trim(), replyTarget ? { replySender: replyTarget.sender, replyText: replyTarget.text } : {});
+    await sendConversationMessage(activeThread.recipients, activeThread.title, body, { group: activeThread.group });
     $("#replyBox").value = "";
+    clearReplyTarget();
     toast("Reply sent.");
     await fetchMessages();
   } catch (error) {
@@ -1364,6 +1636,7 @@ $("#videoCallButton").addEventListener("click", () => startCall("video"));
 $("#acceptCallButton").addEventListener("click", acceptCall);
 $("#enableRingButton").addEventListener("click", enableIncomingRingSound);
 $("#muteCallButton").addEventListener("click", toggleCallMute);
+$("#cameraCallButton").addEventListener("click", toggleCallCamera);
 $("#endCallButton").addEventListener("click", endCall);
 document.addEventListener("pointerdown", () => {
   if (!ringtoneUnlocked) ensureRingtoneAudio().catch(() => {});
@@ -1469,6 +1742,11 @@ $("#statusSelect").addEventListener("change", (event) => {
 $("#semanticSearch").addEventListener("input", (event) => {
   searchText = event.target.value.trim().toLowerCase();
   renderThreads();
+});
+$("#conversationSearch").addEventListener("input", (event) => {
+  conversationSearch = event.target.value.trim().toLowerCase();
+  showAllMessages = true;
+  if (activeThread) renderMessages();
 });
 
 document.querySelectorAll(".nav-list button, .folder, .saved-search, .chip").forEach((button) => {
@@ -1583,7 +1861,7 @@ $("#fileInput").addEventListener("change", async (event) => {
 });
 
 $("#voiceNoteButton").addEventListener("click", async () => {
-  if (voiceRecorder?.state === "recording") {
+  if (["recording", "paused"].includes(voiceRecorder?.state)) {
     voiceRecorder.stop();
     return;
   }
@@ -1608,11 +1886,15 @@ $("#voiceNoteButton").addEventListener("click", async () => {
     };
     cancelVoiceNote = false;
     voiceStartedAt = Date.now();
+    pausedVoiceMs = 0;
+    voicePausedAt = 0;
+    $("#recordingLabel").textContent = "Recording";
+    $("#pauseRecordingButton").textContent = "Pause";
     startVoiceWaveform(stream);
     $("#recordingStrip").hidden = false;
     $("#recordingTime").textContent = "0:00";
     voiceTimer = window.setInterval(() => {
-      const seconds = Math.floor((Date.now() - voiceStartedAt) / 1000);
+      const seconds = Math.floor((Date.now() - voiceStartedAt - pausedVoiceMs - (voicePausedAt ? Date.now() - voicePausedAt : 0)) / 1000);
       $("#recordingTime").textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
       if (seconds >= 60 && voiceRecorder?.state === "recording") voiceRecorder.stop();
     }, 250);
@@ -1624,10 +1906,25 @@ $("#voiceNoteButton").addEventListener("click", async () => {
   }
 });
 $("#cancelRecordingButton").addEventListener("click", () => {
-  if (voiceRecorder?.state !== "recording") return;
+  if (!["recording", "paused"].includes(voiceRecorder?.state)) return;
   cancelVoiceNote = true;
   voiceRecorder.stop();
   toast("Voice note canceled.");
+});
+$("#pauseRecordingButton").addEventListener("click", () => {
+  if (!voiceRecorder || !["recording", "paused"].includes(voiceRecorder.state)) return;
+  if (voiceRecorder.state === "recording") {
+    voiceRecorder.pause();
+    voicePausedAt = Date.now();
+    $("#recordingLabel").textContent = "Paused";
+    $("#pauseRecordingButton").textContent = "Resume";
+  } else {
+    voiceRecorder.resume();
+    pausedVoiceMs += Date.now() - voicePausedAt;
+    voicePausedAt = 0;
+    $("#recordingLabel").textContent = "Recording";
+    $("#pauseRecordingButton").textContent = "Pause";
+  }
 });
 
 $("#inlineAiButton").addEventListener("click", () => {
@@ -1638,6 +1935,11 @@ $("#inlineAiButton").addEventListener("click", () => {
 $("#sidebarNotificationsButton").addEventListener("click", openNotificationDialog);
 $("#sidebarProfileButton").addEventListener("click", () => $("#profileButton").click());
 $("#installHelpButton").addEventListener("click", () => openSettingsDialog($("#installDialog")));
+$("#clearReplyContextButton").addEventListener("click", clearReplyTarget);
+$("#markAllReadButton").addEventListener("click", (event) => {
+  event.stopPropagation();
+  markAllThreadsRead();
+});
 $("#unreadNotificationStrip").addEventListener("click", () => {
   const thread = threads.find((item) => item.unreadCount > 0);
   if (!thread) return;
@@ -1651,6 +1953,12 @@ $("#unreadNotificationStrip").addEventListener("click", () => {
 render();
 registerServiceWorker().then(renderBackgroundCallStatus);
 document.addEventListener("click", requestDefaultNotificationPermission, { once: true });
+window.addEventListener("online", flushOutgoingQueue);
+flushOutgoingQueue();
 fetchMessages();
 window.setInterval(fetchMessages, 15000);
 window.setInterval(pollCalls, 2500);
+
+const shortcut = new URLSearchParams(window.location.search).get("shortcut");
+if (shortcut === "compose") openCompose();
+if (shortcut === "ai") openSettingsDialog($("#aiDialog"));

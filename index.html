@@ -103,6 +103,7 @@
               <strong id="unreadNotificationText">You have unread messages.</strong>
               <span id="unreadNotificationCount">0</span>
             </button>
+            <button class="mark-all-read-button" id="markAllReadButton" hidden><i data-lucide="check-check"></i> Mark all read</button>
 
             <div class="filter-row">
               <button class="chip active">All</button>
@@ -152,7 +153,10 @@
             </div>
 
             <div class="reader-tools">
-              <button class="ghost-button" id="readerToolsButton" aria-expanded="false"><i data-lucide="sliders-horizontal"></i> Tools</button>
+              <div class="reader-tool-row">
+                <button class="ghost-button" id="readerToolsButton" aria-expanded="false"><i data-lucide="sliders-horizontal"></i> Tools</button>
+                <label class="conversation-search"><i data-lucide="search"></i><input id="conversationSearch" type="search" placeholder="Search this chat" /></label>
+              </div>
               <div class="reader-tools-panel" id="readerToolsPanel" hidden>
                 <div class="quick-actions">
                   <button data-action="summary"><i data-lucide="sparkles"></i> Summarize</button>
@@ -175,7 +179,8 @@
 
             <div class="reply-dock">
               <div class="collision-alert" id="collisionAlert" hidden><i data-lucide="triangle-alert"></i> A teammate is drafting a reply in this thread.</div>
-              <div class="recording-strip" id="recordingStrip" hidden><i data-lucide="mic"></i><strong>Recording</strong><span id="recordingTime">0:00</span><div class="voice-waveform" id="voiceWaveform" aria-label="Live microphone level"></div><button class="ghost-button" id="cancelRecordingButton" type="button">Cancel</button></div>
+              <div class="reply-context" id="replyContext" hidden><span id="replyContextText"></span><button class="icon-button" id="clearReplyContextButton" type="button" title="Cancel message reply"><i data-lucide="x"></i></button></div>
+              <div class="recording-strip" id="recordingStrip" hidden><i data-lucide="mic"></i><strong id="recordingLabel">Recording</strong><span id="recordingTime">0:00</span><div class="voice-waveform" id="voiceWaveform" aria-label="Live microphone level"></div><button class="ghost-button" id="pauseRecordingButton" type="button">Pause</button><button class="ghost-button" id="cancelRecordingButton" type="button">Cancel</button></div>
               <textarea id="replyBox" placeholder="Draft a reply, use a template, or ask AI to match your tone"></textarea>
               <div class="reply-actions">
                 <select id="templateSelect" aria-label="Saved reply templates">
@@ -200,9 +205,18 @@
             <section id="groupInfoSection" hidden>
               <h2>Group Info</h2>
               <label>Group name<input class="note-input" id="groupNameInput" /></label>
+              <label>Group picture<input id="groupAvatarInput" type="file" accept="image/*" /></label>
               <label>Add handles<input class="note-input" id="groupMembersInput" placeholder="sam, jordan" /></label>
+              <label>Remove handles <span class="optional-label">Group admin only</span><input class="note-input" id="groupRemoveMembersInput" placeholder="sam, jordan" /></label>
+              <label class="remember-row"><input id="muteGroupToggle" type="checkbox" /> Mute notifications</label>
               <div class="compact-actions"><button class="ghost-button" id="saveGroupButton">Save group</button><button class="ghost-button danger-button" id="leaveGroupButton">Leave</button></div>
               <p class="dialog-help" id="groupMemberList"></p>
+            </section>
+            <section id="contactPrivacySection">
+              <h2>Contact Controls</h2>
+              <div class="compact-actions"><button class="ghost-button" id="favoriteContactButton"><i data-lucide="star"></i> Favorite</button><button class="ghost-button danger-button" id="blockContactButton"><i data-lucide="ban"></i> Block</button></div>
+              <label class="remember-row"><input id="disappearingMessagesToggle" type="checkbox" /> Disappear new messages after 24 hours</label>
+              <p class="dialog-help" id="privacyStatus"></p>
             </section>
             <section>
               <div class="panel-header compact">
@@ -257,6 +271,7 @@
           <button class="call-action sound" id="enableRingButton" hidden title="Enable ringtone sound"><i data-lucide="volume-2"></i><span>Sound</span></button>
           <button class="call-action accept" id="acceptCallButton" hidden title="Accept call"><i data-lucide="phone"></i><span>Accept</span></button>
           <button class="call-action" id="muteCallButton" hidden title="Mute microphone"><i data-lucide="mic-off"></i><span>Mute</span></button>
+          <button class="call-action" id="cameraCallButton" hidden title="Turn camera off"><i data-lucide="video-off"></i><span>Camera</span></button>
           <button class="call-action end" id="endCallButton" title="End call"><i data-lucide="phone-off"></i><span>End</span></button>
         </div>
       </div>
