@@ -3,12 +3,17 @@ const SUPABASE_ANON_KEY = "sb_publishable_RYq_rDXqj_Ate8B66PcJEQ_a6yv1YUl";
 const MESSAGES_TABLE = "threadmail_messages";
 const GAMES_TABLE = "threadmail_games";
 const TYPING_TABLE = "threadmail_typing";
+const CALLS_TABLE = "threadmail_calls";
 const GAME_PREFIX = "THREADLINE_GAME::";
 const VOICE_NOTE_PREFIX = "THREADMAIL_VOICE_NOTE::";
 const PHOTO_PREFIX = "THREADMAIL_PHOTO::";
 const FILE_PREFIX = "THREADLINE_FILE::";
 const GROUP_PREFIX = "THREADLINE_GROUP::";
 const AI_HANDLE = "threadai";
+const ICE_SERVERS = [
+  { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
+  { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" },
+];
 let threads = [];
 let gameRows = [];
 let typingRows = [];
@@ -20,6 +25,8 @@ let voiceRecorder = null;
 let voiceChunks = [];
 let typingIdleTimer = null;
 let lastTypingSentAt = 0;
+let callSession = null;
+let knownCallCandidateCounts = { caller: 0, callee: 0 };
 
 let activeThread = null;
 let quotesCleaned = false;
@@ -281,6 +288,200 @@ function notifyNewUnread(rows, handle) {
   const row = fresh[0];
   const notificationBody = unpackGroupBody(row.body).body;
   new Notification(`New Threadline message from ${row.sender_handle}`, { body: row.subject || notificationBody.slice(0, 80), icon: "threadline-icon-192.png" });
+}
+
+function getCallPeer() {
+  if (!callSession?.call) return "";
+  return callSession.role === "caller" ? callSession.call.callee_handle : callSession.call.caller_handle;
+}
+
+function showCallPanel({ label = "Threadline call", status = "Connecting...", incoming = false, video = false, connected = false } = {}) {
+  $("#callOverlay").hidden = false;
+  $("#callLabel").textContent = label;
+  $("#callStatus").textContent = status;
+  $("#callVideoStage").hidden = !video;
+  $("#acceptCallButton").hidden = !incoming;
+  $("#muteCallButton").hidden = !connected;
+}
+
+function hideCallPanel() {
+  $("#callOverlay").hidden = true;
+  $("#callVideoStage").hidden = true;
+}
+
+async function patchCall(callId, data) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${CALLS_TABLE}?id=eq.${encodeURIComponent(callId)}`, {
+    method: "PATCH",
+    headers: getHeaders({ "Content-Type": "application/json", Prefer: "return=representation" }),
+    body: JSON.stringify({ ...data, updated_at: new Date().toISOString() }),
+  });
+  const payload = await response.json().catch(() => []);
+  if (!response.ok) throw new Error("Call update failed.");
+  return Array.isArray(payload) ? payload[0] : payload;
+}
+
+async function fetchCall(callId) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${CALLS_TABLE}?id=eq.${encodeURIComponent(callId)}&select=*`, { headers: getHeaders() });
+  const payload = await response.json().catch(() => []);
+  if (!response.ok) throw new Error("Call fetch failed.");
+  return Array.isArray(payload) ? payload[0] : null;
+}
+
+async function getCallMedia(mediaType) {
+  if (mediaType === "voice") return navigator.mediaDevices.getUserMedia({ audio: true });
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: "user" } });
+  } catch {
+    toast("Camera unavailable. Joining with microphone only.");
+    return navigator.mediaDevices.getUserMedia({ audio: true });
+  }
+}
+
+async function createCallPeer(role, call) {
+  const mediaType = call.call_type === "video" ? "video" : "voice";
+  const stream = await getCallMedia(mediaType);
+  const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  if (mediaType === "video") $("#localCallVideo").srcObject = stream;
+  stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+  peer.addEventListener("track", (event) => {
+    if (mediaType === "video") $("#remoteCallVideo").srcObject = event.streams[0];
+    else $("#remoteCallAudio").srcObject = event.streams[0];
+  });
+  peer.addEventListener("icecandidate", async (event) => {
+    if (!event.candidate || !callSession?.call?.id) return;
+    try {
+      const fresh = await fetchCall(callSession.call.id);
+      const key = role === "caller" ? "caller_candidates" : "callee_candidates";
+      const candidates = Array.isArray(fresh?.[key]) ? [...fresh[key]] : [];
+      candidates.push(event.candidate.toJSON());
+      callSession.call = await patchCall(callSession.call.id, { [key]: candidates });
+    } catch {
+      toast("Call connection signal could not sync.");
+    }
+  });
+  peer.addEventListener("connectionstatechange", () => {
+    const status = peer.connectionState === "connected" ? "Connected" : peer.connectionState === "disconnected" ? "Reconnecting..." : "Connecting...";
+    showCallPanel({ label: `${mediaType === "video" ? "FaceTime" : "Voice call"} with ${getCallPeer()}`, status, connected: true, video: mediaType === "video" });
+  });
+  return { peer, stream };
+}
+
+async function startCall(mediaType) {
+  const handle = normalizeHandle(settings.profile?.handle || "");
+  const callee = activeThread?.recipients?.[0] || "";
+  if (!activeThread || activeThread.group) return toast("Calls are currently for two-person conversations.");
+  if (!isValidHandle(handle) || !isValidHandle(callee)) return toast("Open a direct conversation and save your handle first.");
+  if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) return toast("Calls are not supported in this browser.");
+  try {
+    showCallPanel({ label: `Calling ${callee}`, status: mediaType === "video" ? "Starting camera..." : "Starting microphone...", video: mediaType === "video" });
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${CALLS_TABLE}`, {
+      method: "POST",
+      headers: getHeaders({ "Content-Type": "application/json", Prefer: "return=representation" }),
+      body: JSON.stringify([{ call_type: mediaType, caller_handle: handle, callee_handle: callee, status: "ringing" }]),
+    });
+    const payload = await response.json().catch(() => []);
+    if (!response.ok || !payload[0]) throw new Error();
+    const call = payload[0];
+    const { peer, stream } = await createCallPeer("caller", call);
+    callSession = { role: "caller", call, peer, stream, accepted: false, muted: false };
+    knownCallCandidateCounts = { caller: 0, callee: 0 };
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    callSession.call = await patchCall(call.id, { offer: peer.localDescription.toJSON(), status: "ringing" });
+    showCallPanel({ label: `Calling ${callee}`, status: "Ringing...", video: mediaType === "video" });
+  } catch {
+    endLocalCall();
+    toast("Could not start the call.");
+  }
+}
+
+async function acceptCall() {
+  if (!callSession?.call || callSession.role !== "callee") return;
+  try {
+    const { peer, stream } = await createCallPeer("callee", callSession.call);
+    callSession.peer = peer;
+    callSession.stream = stream;
+    await peer.setRemoteDescription(callSession.call.offer);
+    const answer = await peer.createAnswer();
+    await peer.setLocalDescription(answer);
+    callSession.call = await patchCall(callSession.call.id, { answer: peer.localDescription.toJSON(), status: "accepted" });
+    knownCallCandidateCounts = { caller: 0, callee: 0 };
+    showCallPanel({ label: `${callSession.call.call_type === "video" ? "FaceTime" : "Voice call"} with ${getCallPeer()}`, status: "Connecting...", connected: true, video: callSession.call.call_type === "video" });
+  } catch {
+    toast("Could not accept the call.");
+    endCall();
+  }
+}
+
+async function addRemoteCandidates(call) {
+  if (!callSession?.peer) return;
+  const key = callSession.role === "caller" ? "callee_candidates" : "caller_candidates";
+  const seenKey = callSession.role === "caller" ? "callee" : "caller";
+  const candidates = Array.isArray(call[key]) ? call[key] : [];
+  for (const candidate of candidates.slice(knownCallCandidateCounts[seenKey])) {
+    try { await callSession.peer.addIceCandidate(candidate); } catch { /* descriptions may still be syncing */ }
+  }
+  knownCallCandidateCounts[seenKey] = candidates.length;
+}
+
+async function pollCalls() {
+  const handle = normalizeHandle(settings.profile?.handle || "");
+  if (!isValidHandle(handle)) return;
+  try {
+    if (callSession?.call?.id) {
+      const call = await fetchCall(callSession.call.id);
+      if (!call) return;
+      callSession.call = call;
+      if (["declined", "ended"].includes(call.status)) return endLocalCall();
+      if (callSession.role === "caller" && call.answer && !callSession.accepted) {
+        await callSession.peer.setRemoteDescription(call.answer);
+        callSession.accepted = true;
+      }
+      await addRemoteCandidates(call);
+      return;
+    }
+    const since = new Date(Date.now() - 60000).toISOString();
+    const query = `callee_handle=eq.${encodeURIComponent(handle)}&status=eq.ringing&updated_at=gt.${encodeURIComponent(since)}&select=*&order=updated_at.desc&limit=1`;
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${CALLS_TABLE}?${query}`, { headers: getHeaders() });
+    const payload = await response.json().catch(() => []);
+    if (!response.ok || !payload[0]) return;
+    const call = payload[0];
+    callSession = { role: "callee", call, peer: null, stream: null, accepted: false, muted: false };
+    knownCallCandidateCounts = { caller: 0, callee: 0 };
+    showCallPanel({ label: `Incoming ${call.call_type === "video" ? "FaceTime" : "voice call"} from ${call.caller_handle}`, status: "Incoming call", incoming: true, video: call.call_type === "video" });
+    if ("vibrate" in navigator) navigator.vibrate([220, 120, 220]);
+  } catch {
+    // Calling is optional if the shared call table is not configured.
+  }
+}
+
+function toggleCallMute() {
+  if (!callSession?.stream) return;
+  callSession.muted = !callSession.muted;
+  callSession.stream.getAudioTracks().forEach((track) => { track.enabled = !callSession.muted; });
+  $("#muteCallButton span").textContent = callSession.muted ? "Unmute" : "Mute";
+}
+
+function endLocalCall() {
+  callSession?.stream?.getTracks().forEach((track) => track.stop());
+  callSession?.peer?.close();
+  callSession = null;
+  knownCallCandidateCounts = { caller: 0, callee: 0 };
+  $("#remoteCallAudio").srcObject = null;
+  $("#remoteCallVideo").srcObject = null;
+  $("#localCallVideo").srcObject = null;
+  $("#muteCallButton span").textContent = "Mute";
+  if ("vibrate" in navigator) navigator.vibrate(0);
+  hideCallPanel();
+}
+
+async function endCall() {
+  try {
+    if (callSession?.call?.id) await patchCall(callSession.call.id, { status: callSession.role === "callee" && !callSession.peer ? "declined" : "ended" });
+  } catch {
+    // Local cleanup still matters if the network drops.
+  }
+  endLocalCall();
 }
 
 function toast(message) {
@@ -621,6 +822,8 @@ function renderReader() {
   status.textContent = activeThread.status;
   status.className = `status-pill ${activeThread.status.toLowerCase()}`;
   $("#statusSelect").value = activeThread.status;
+  $("#voiceCallButton").disabled = Boolean(activeThread.group);
+  $("#videoCallButton").disabled = Boolean(activeThread.group);
   renderMessages();
   renderActions();
   renderGameBoard();
@@ -905,6 +1108,11 @@ $("#sendReplyButton").addEventListener("click", async () => {
   }
 });
 $("#refreshButton").addEventListener("click", fetchMessages);
+$("#voiceCallButton").addEventListener("click", () => startCall("voice"));
+$("#videoCallButton").addEventListener("click", () => startCall("video"));
+$("#acceptCallButton").addEventListener("click", acceptCall);
+$("#muteCallButton").addEventListener("click", toggleCallMute);
+$("#endCallButton").addEventListener("click", endCall);
 $("#threadAiButton").addEventListener("click", () => openSettingsDialog($("#aiDialog")));
 function getBasicAiReply(prompt) {
   const text = prompt.toLowerCase();
@@ -1128,3 +1336,4 @@ $("#installHelpButton").addEventListener("click", () => openSettingsDialog($("#i
 render();
 fetchMessages();
 window.setInterval(fetchMessages, 15000);
+window.setInterval(pollCalls, 2500);

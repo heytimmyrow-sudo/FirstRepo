@@ -128,6 +128,8 @@
                 <p class="presence-line" id="detailPresence"></p>
               </div>
               <div class="reader-actions">
+                <button class="icon-button" title="Start voice call" id="voiceCallButton"><i data-lucide="phone"></i></button>
+                <button class="icon-button" title="Start FaceTime" id="videoCallButton"><i data-lucide="video"></i></button>
                 <button class="icon-button" title="Pin important message" id="pinButton"><i data-lucide="pin"></i></button>
                 <button class="icon-button" title="Snooze thread" id="snoozeButton"><i data-lucide="alarm-clock"></i></button>
                 <button class="icon-button" title="Show conversation details" id="inspectorButton" aria-expanded="false"><i data-lucide="panel-right-open"></i></button>
@@ -226,6 +228,24 @@
       </main>
     </div>
     <button class="sidebar-scrim" type="button" id="sidebarScrim" aria-label="Close sidebar"></button>
+
+    <section class="call-overlay" id="callOverlay" hidden aria-live="polite">
+      <div class="call-stage" id="callVideoStage" hidden>
+        <video id="remoteCallVideo" autoplay playsinline></video>
+        <video class="local-call-video" id="localCallVideo" autoplay muted playsinline></video>
+      </div>
+      <div class="call-content">
+        <span class="eyebrow">Threadline call</span>
+        <h2 id="callLabel">Calling...</h2>
+        <p id="callStatus">Connecting...</p>
+        <audio id="remoteCallAudio" autoplay></audio>
+        <div class="call-actions">
+          <button class="call-action accept" id="acceptCallButton" hidden title="Accept call"><i data-lucide="phone"></i><span>Accept</span></button>
+          <button class="call-action" id="muteCallButton" hidden title="Mute microphone"><i data-lucide="mic-off"></i><span>Mute</span></button>
+          <button class="call-action end" id="endCallButton" title="End call"><i data-lucide="phone-off"></i><span>End</span></button>
+        </div>
+      </div>
+    </section>
 
     <dialog class="compose-dialog" id="composeDialog">
       <form method="dialog" id="composeForm">
