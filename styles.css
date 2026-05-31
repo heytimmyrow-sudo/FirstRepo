@@ -185,6 +185,12 @@ h2 {
 .profile-button {
   background: var(--panel-strong);
   font-weight: 800;
+  overflow: hidden;
+}
+
+.profile-button .avatar-image {
+  width: 34px;
+  height: 34px;
 }
 
 .nav-list,

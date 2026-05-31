@@ -179,6 +179,15 @@ function unpackMessageBody(body) {
   }
 }
 
+function getMessageSummary(body) {
+  if (parsePrefixedJson(body, VOICE_NOTE_PREFIX)) return "Voice note";
+  if (parsePrefixedJson(body, PHOTO_PREFIX)) return "Photo";
+  if (parsePrefixedJson(body, FILE_PREFIX)) return "Shared file";
+  if (parsePrefixedJson(body, CALL_LOG_PREFIX)) return "Call history";
+  if (String(body || "").startsWith("THREADMAIL_CALL_INVITE::")) return "Call invite";
+  return String(body || "").slice(0, 120);
+}
+
 function isVisibleMessageRow(row) {
   if (getSettingList("blockedHandles").includes(row.sender_handle)) return false;
   const grouped = unpackGroupBody(row.body);
@@ -383,7 +392,7 @@ async function fetchMessages() {
         labels: group ? `${group.members.length} people` : game || decoded.game ? `Game: ${getGameTitle(game?.type || decoded.game)}` : "Live",
         urgency: settings.threadWorkflow?.[key]?.priority || "Normal",
         receipt: "Synced",
-        summary: game || decoded.game ? `${other} shared a ${getGameTitle(game?.type || decoded.game)} game.` : decoded.body.slice(0, 120),
+        summary: game || decoded.game ? `${other} shared a ${getGameTitle(game?.type || decoded.game)} game.` : getMessageSummary(decoded.body),
         changed: "Synced from live messaging.",
         actions: [],
         rows,
@@ -1538,7 +1547,7 @@ $("#profileForm").addEventListener("submit", async (event) => {
 });
 $("#profileAvatar").addEventListener("change", async (event) => {
   try {
-    pendingAvatar = await readFileAsDataUrl(event.target.files[0], 300 * 1024);
+    pendingAvatar = await readAvatarDataUrl(event.target.files[0]);
     $("#avatarPreview").innerHTML = `<img src="${escapeHtml(pendingAvatar)}" alt="Profile preview" />`;
   } catch (error) {
     toast(error.message);
@@ -1577,7 +1586,7 @@ $("#manageContactsButton").addEventListener("click", openContactsManager);
 $("#contactAvatarInput").addEventListener("change", async (event) => {
   if (!event.target.files[0]) return;
   try {
-    pendingContactAvatar = await readFileAsDataUrl(event.target.files[0], 300 * 1024);
+    pendingContactAvatar = await readAvatarDataUrl(event.target.files[0]);
   } catch (error) {
     toast(error.message);
   }
@@ -1632,7 +1641,7 @@ $("#groupAvatarInput").addEventListener("change", async (event) => {
   if (!activeThread?.group || !event.target.files[0]) return;
   try {
     settings.groupAvatars ||= {};
-    settings.groupAvatars[activeThread.group.id] = await readFileAsDataUrl(event.target.files[0], 300 * 1024);
+    settings.groupAvatars[activeThread.group.id] = await readAvatarDataUrl(event.target.files[0]);
     saveSettings();
     toast("Group picture saved on this device.");
   } catch (error) {
@@ -1956,6 +1965,31 @@ function readFileAsDataUrl(file, maxBytes) {
     reader.onload = () => resolve(reader.result);
     reader.onerror = () => reject(new Error("Could not read that file."));
     reader.readAsDataURL(file);
+  });
+}
+
+function readAvatarDataUrl(file) {
+  if (!file || !String(file.type).startsWith("image/")) throw new Error("Choose an image for the profile picture.");
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+    image.onload = () => {
+      const size = Math.min(image.naturalWidth, image.naturalHeight);
+      const canvas = document.createElement("canvas");
+      canvas.width = 256;
+      canvas.height = 256;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, 256, 256);
+      context.drawImage(image, (image.naturalWidth - size) / 2, (image.naturalHeight - size) / 2, size, size, 0, 0, 256, 256);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", 0.84));
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("That image could not be opened. Try a JPG or PNG."));
+    };
+    image.src = url;
   });
 }
 
