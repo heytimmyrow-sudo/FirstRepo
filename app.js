@@ -8,6 +8,7 @@ const GAME_PREFIX = "THREADLINE_GAME::";
 const VOICE_NOTE_PREFIX = "THREADMAIL_VOICE_NOTE::";
 const PHOTO_PREFIX = "THREADMAIL_PHOTO::";
 const FILE_PREFIX = "THREADLINE_FILE::";
+const CALL_LOG_PREFIX = "THREADLINE_CALL_LOG::";
 const GROUP_PREFIX = "THREADLINE_GROUP::";
 const AI_HANDLE = "threadai";
 const ICE_SERVERS = [
@@ -31,6 +32,11 @@ let ringtoneAudio = null;
 let ringtoneTimer = null;
 let ringtoneUnlocked = false;
 let serviceWorkerRegistration = null;
+let voiceStartedAt = 0;
+let voiceTimer = null;
+let cancelVoiceNote = false;
+let pendingAvatar = "";
+let loggedCallIds = new Set();
 
 let activeThread = null;
 let quotesCleaned = false;
@@ -402,7 +408,9 @@ function renderBackgroundCallStatus() {
     return;
   }
   status.textContent = serviceWorkerRegistration
-    ? "Tap-to-answer call alerts are installed. Fully closed-app delivery still needs the Threadline push sender."
+    ? ("PushManager" in window
+      ? "Tap-to-answer alerts are installed. Closed-app delivery is ready for the pending Threadline VAPID sender."
+      : "Tap-to-answer alerts are installed, but this browser does not support closed-app push.")
     : "Installed-app call alerts will finish preparing after this page reloads.";
 }
 
@@ -530,7 +538,10 @@ async function pollCalls() {
       const call = await fetchCall(callSession.call.id);
       if (!call) return;
       callSession.call = call;
-      if (["declined", "ended"].includes(call.status)) return endLocalCall();
+      if (["declined", "ended"].includes(call.status)) {
+        await logCallHistory(call, call.status === "declined" ? "Missed call" : `${call.call_type === "video" ? "FaceTime" : "Voice"} call ended`);
+        return endLocalCall();
+      }
       if (callSession.role === "caller" && call.answer && !callSession.accepted) {
         await callSession.peer.setRemoteDescription(call.answer);
         callSession.accepted = true;
@@ -574,12 +585,28 @@ function endLocalCall() {
   hideCallPanel();
 }
 
-async function endCall() {
+async function logCallHistory(call, label) {
+  if (!call?.id || loggedCallIds.has(call.id)) return;
+  loggedCallIds.add(call.id);
+  const me = normalizeHandle(settings.profile?.handle || "");
+  const recipient = call.caller_handle === me ? call.callee_handle : call.caller_handle;
+  if (!isValidHandle(recipient)) return;
   try {
-    if (callSession?.call?.id) await patchCall(callSession.call.id, { status: callSession.role === "callee" && !callSession.peer ? "declined" : "ended" });
+    await sendRemoteMessage(recipient, "Call history", `${CALL_LOG_PREFIX}${JSON.stringify({ type: call.call_type || "voice", label })}\n${label}`);
+  } catch {
+    // The call should still close even if history cannot sync.
+  }
+}
+
+async function endCall() {
+  const call = callSession?.call;
+  const declined = callSession?.role === "callee" && !callSession.peer;
+  try {
+    if (call?.id) await patchCall(call.id, { status: declined ? "declined" : "ended" });
   } catch {
     // Local cleanup still matters if the network drops.
   }
+  await logCallHistory(call, declined ? "Missed call" : `${call?.call_type === "video" ? "FaceTime" : "Voice"} call ended`);
   endLocalCall();
 }
 
@@ -603,7 +630,8 @@ function renderSettings() {
     .map((part) => part[0].toUpperCase())
     .join("");
   $("#profileMark").textContent = initials || "";
-  if (!initials) $("#profileMark").innerHTML = '<i data-lucide="user"></i>';
+  if (settings.profile?.avatar) $("#profileMark").innerHTML = `<img class="avatar-image" src="${escapeHtml(settings.profile.avatar)}" alt="" />`;
+  else if (!initials) $("#profileMark").innerHTML = '<i data-lucide="user"></i>';
   $("#emptyReaderText").textContent = settings.inbox
     ? `${settings.inbox.provider} inbox ${settings.inbox.email} is labeled as connected. Compose a message to start your first thread.`
     : "Connect an inbox or compose a message to start your first thread.";
@@ -733,6 +761,8 @@ function renderMessages() {
 }
 
 function renderMessageBody(body) {
+  const call = parsePrefixedJson(body, CALL_LOG_PREFIX);
+  if (call) return `<div class="message-media"><strong>${escapeHtml(call.label || "Call ended")}</strong><button class="ghost-button call-back-button" data-call-type="${escapeHtml(call.type || "voice")}"><i data-lucide="${call.type === "video" ? "video" : "phone"}"></i> Call back</button></div>`;
   const photo = parsePrefixedJson(body, PHOTO_PREFIX);
   if (photo?.url) return `<div class="message-media"><img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.name || "Sent photo")}" /><span>${escapeHtml(photo.name || "Photo")}</span></div>`;
   const voice = parsePrefixedJson(body, VOICE_NOTE_PREFIX);
@@ -746,6 +776,15 @@ function renderActions() {
   $("#actionItems").innerHTML = activeThread.actions
     .map((item, index) => `<label><input type="checkbox" ${index === 2 ? "checked" : ""} /> ${item}</label>`)
     .join("");
+}
+
+function renderGroupInfo() {
+  const section = $("#groupInfoSection");
+  section.hidden = !activeThread?.group;
+  if (!activeThread?.group) return;
+  $("#groupNameInput").value = activeThread.group.name;
+  $("#groupMembersInput").value = "";
+  $("#groupMemberList").textContent = `Members: ${activeThread.group.members.join(", ")}`;
 }
 
 function activeTypingHandle() {
@@ -926,6 +965,7 @@ function renderReader() {
   renderMessages();
   renderActions();
   renderGameBoard();
+  renderGroupInfo();
 }
 
 function render() {
@@ -952,6 +992,8 @@ function aiAction(action) {
 document.addEventListener("click", (event) => {
   const button = event.target.closest(".quick-actions button");
   if (button && activeThread) aiAction(button.dataset.action);
+  const callback = event.target.closest(".call-back-button");
+  if (callback) startCall(callback.dataset.callType === "video" ? "video" : "voice");
 });
 
 $("#themeToggle").addEventListener("change", (event) => {
@@ -1071,6 +1113,8 @@ $("#profileButton").addEventListener("click", () => {
   $("#profilePasscode").value = "";
   $("#profileRecoveryEmail").value = settings.recoveryEmail || "";
   $("#profileRememberMe").checked = localStorage.getItem("threadlineRemembered") === "1";
+  pendingAvatar = settings.profile?.avatar || "";
+  $("#avatarPreview").innerHTML = pendingAvatar ? `<img src="${escapeHtml(pendingAvatar)}" alt="Profile preview" />` : "";
   openSettingsDialog($("#profileDialog"));
 });
 $("#profileForm").addEventListener("submit", async (event) => {
@@ -1091,6 +1135,7 @@ $("#profileForm").addEventListener("submit", async (event) => {
     handle,
     email: $("#profileEmail").value.trim(),
     workspace: $("#profileWorkspace").value.trim(),
+    avatar: pendingAvatar,
   };
   if (passcode) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recoveryEmail)) {
@@ -1108,6 +1153,36 @@ $("#profileForm").addEventListener("submit", async (event) => {
   $("#profileDialog").close();
   toast("Profile saved.");
   fetchMessages();
+});
+$("#profileAvatar").addEventListener("change", async (event) => {
+  try {
+    pendingAvatar = await readFileAsDataUrl(event.target.files[0], 300 * 1024);
+    $("#avatarPreview").innerHTML = `<img src="${escapeHtml(pendingAvatar)}" alt="Profile preview" />`;
+  } catch (error) {
+    toast(error.message);
+  }
+});
+
+$("#saveGroupButton").addEventListener("click", async () => {
+  if (!activeThread?.group) return;
+  const members = [...new Set([...activeThread.group.members, ...parseRecipients($("#groupMembersInput").value)])];
+  const group = { ...activeThread.group, name: $("#groupNameInput").value.trim() || activeThread.group.name, members };
+  try {
+    await sendConversationMessage(members, activeThread.title, `Group updated by ${settings.profile.handle}.`, { group });
+    toast("Group updated.");
+    await fetchMessages();
+  } catch (error) { toast(error.message); }
+});
+$("#leaveGroupButton").addEventListener("click", async () => {
+  if (!activeThread?.group) return;
+  const members = activeThread.group.members.filter((member) => member !== settings.profile.handle);
+  try {
+    const group = { ...activeThread.group, members, messageId: createMessageId() };
+    await Promise.all(members.map((member) => sendRemoteMessage(member, activeThread.title, packGroupBody(`${settings.profile.handle} left the group.`, group))));
+    activeThread = null;
+    toast("You left the group.");
+    await fetchMessages();
+  } catch (error) { toast(error.message); }
 });
 
 function openNotificationDialog() {
@@ -1413,19 +1488,38 @@ $("#voiceNoteButton").addEventListener("click", async () => {
     voiceRecorder = new MediaRecorder(stream);
     voiceRecorder.ondataavailable = (event) => voiceChunks.push(event.data);
     voiceRecorder.onstop = async () => {
+      window.clearInterval(voiceTimer);
+      voiceTimer = null;
+      $("#recordingStrip").hidden = true;
       stream.getTracks().forEach((track) => track.stop());
+      $("#voiceNoteButton").classList.remove("active");
+      if (cancelVoiceNote) return;
       const blob = new Blob(voiceChunks, { type: voiceRecorder.mimeType });
       if (blob.size > 500 * 1024) return toast("Keep voice notes short, under 500 KB.");
       const file = new File([blob], "voice-note.webm", { type: blob.type });
       await sendAttachment(VOICE_NOTE_PREFIX, { url: await readFileAsDataUrl(file, 500 * 1024) }, "Voice note");
-      $("#voiceNoteButton").classList.remove("active");
     };
+    cancelVoiceNote = false;
+    voiceStartedAt = Date.now();
+    $("#recordingStrip").hidden = false;
+    $("#recordingTime").textContent = "0:00";
+    voiceTimer = window.setInterval(() => {
+      const seconds = Math.floor((Date.now() - voiceStartedAt) / 1000);
+      $("#recordingTime").textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+      if (seconds >= 60 && voiceRecorder?.state === "recording") voiceRecorder.stop();
+    }, 250);
     voiceRecorder.start();
     $("#voiceNoteButton").classList.add("active");
     toast("Recording voice note. Tap the microphone again to send.");
   } catch {
     toast("Microphone permission was not granted.");
   }
+});
+$("#cancelRecordingButton").addEventListener("click", () => {
+  if (voiceRecorder?.state !== "recording") return;
+  cancelVoiceNote = true;
+  voiceRecorder.stop();
+  toast("Voice note canceled.");
 });
 
 $("#inlineAiButton").addEventListener("click", () => {

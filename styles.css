@@ -603,6 +603,51 @@ body.filters-open .filter-row {
   font-size: 13px;
 }
 
+.recording-strip,
+.compact-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.recording-strip {
+  margin-bottom: 10px;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.recording-strip .ghost-button {
+  margin-left: auto;
+}
+
+.danger-button {
+  color: var(--danger);
+}
+
+.avatar-preview,
+.avatar-image {
+  width: 42px;
+  height: 42px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--panel-strong);
+  object-fit: cover;
+}
+
+.avatar-preview:empty {
+  display: none;
+}
+
+.avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.message-head > div {
+  min-width: 0;
+}
+
 textarea {
   width: 100%;
   min-height: 96px;

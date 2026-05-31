@@ -169,6 +169,7 @@
 
             <div class="reply-dock">
               <div class="collision-alert" id="collisionAlert" hidden><i data-lucide="triangle-alert"></i> A teammate is drafting a reply in this thread.</div>
+              <div class="recording-strip" id="recordingStrip" hidden><i data-lucide="mic"></i><strong>Recording</strong><span id="recordingTime">0:00</span><button class="ghost-button" id="cancelRecordingButton" type="button">Cancel</button></div>
               <textarea id="replyBox" placeholder="Draft a reply, use a template, or ask AI to match your tone"></textarea>
               <div class="reply-actions">
                 <select id="templateSelect" aria-label="Saved reply templates">
@@ -190,6 +191,13 @@
           </section>
 
           <aside class="inspector-panel" aria-label="Thread inspector" id="inspectorPanel">
+            <section id="groupInfoSection" hidden>
+              <h2>Group Info</h2>
+              <label>Group name<input class="note-input" id="groupNameInput" /></label>
+              <label>Add handles<input class="note-input" id="groupMembersInput" placeholder="sam, jordan" /></label>
+              <div class="compact-actions"><button class="ghost-button" id="saveGroupButton">Save group</button><button class="ghost-button danger-button" id="leaveGroupButton">Leave</button></div>
+              <p class="dialog-help" id="groupMemberList"></p>
+            </section>
             <section>
               <div class="panel-header compact">
                 <h2>Workflow</h2>
@@ -282,6 +290,8 @@
           <button class="icon-button" type="button" data-close-dialog onclick="this.closest('dialog').close()" title="Close profile"><i data-lucide="x"></i></button>
         </div>
         <label>Name<input id="profileName" required placeholder="Your name" /></label>
+        <label>Profile picture<input id="profileAvatar" type="file" accept="image/*" /></label>
+        <div class="avatar-preview" id="avatarPreview"></div>
         <label>Threadline handle<input id="profileHandle" required placeholder="example: ari" /></label>
         <label>Email<input id="profileEmail" type="email" placeholder="you@example.com" /></label>
         <label>Workspace<input id="profileWorkspace" placeholder="Workspace name" /></label>
