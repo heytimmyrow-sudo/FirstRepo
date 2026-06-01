@@ -11,6 +11,8 @@ const FILE_PREFIX = "THREADLINE_FILE::";
 const CALL_LOG_PREFIX = "THREADLINE_CALL_LOG::";
 const GROUP_PREFIX = "THREADLINE_GROUP::";
 const MESSAGE_META_PREFIX = "THREADLINE_META::";
+const SYNC_STATE_PREFIX = "THREADLINE_SYNC_STATE::";
+const SYNC_SUBJECT = "Threadline Sync";
 const AI_HANDLE = "threadai";
 const DEFAULT_NOTIFICATIONS = { replies: true, mentions: true, followups: true, device: true };
 let appShortcut = new URLSearchParams(window.location.search).get("shortcut");
@@ -47,6 +49,8 @@ let conversationSearch = "";
 let pausedVoiceMs = 0;
 let voicePausedAt = 0;
 let pendingContactAvatar = "";
+let suppressSyncBroadcast = false;
+let syncBroadcastTimer = null;
 
 let activeThread = null;
 let quotesCleaned = false;
@@ -188,6 +192,46 @@ function getMessageSummary(body) {
   return String(body || "").slice(0, 120);
 }
 
+function isSyncMessageRow(row) {
+  return row?.subject === SYNC_SUBJECT && String(row?.body || "").startsWith(SYNC_STATE_PREFIX);
+}
+
+function getSyncSnapshot() {
+  return {
+    profile: settings.profile || {},
+    recoveryEmail: settings.recoveryEmail || "",
+    darkMode: Boolean(settings.darkMode),
+    notifications: settings.notifications || {},
+    contactProfiles: settings.contactProfiles || {},
+    favoriteHandles: getSettingList("favoriteHandles"),
+    blockedHandles: getSettingList("blockedHandles"),
+    disappearingHandles: getSettingList("disappearingHandles"),
+    mutedGroupIds: getSettingList("mutedGroupIds"),
+    groupAvatars: settings.groupAvatars || {},
+    threadWorkflow: settings.threadWorkflow || {},
+    inbox: settings.inbox || {},
+  };
+}
+
+function mergeSyncSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return;
+  settings = {
+    ...settings,
+    profile: snapshot.profile || settings.profile || {},
+    recoveryEmail: snapshot.recoveryEmail ?? settings.recoveryEmail ?? "",
+    darkMode: Boolean(snapshot.darkMode ?? settings.darkMode),
+    notifications: { ...DEFAULT_NOTIFICATIONS, ...(snapshot.notifications || settings.notifications || {}) },
+    contactProfiles: { ...(settings.contactProfiles || {}), ...(snapshot.contactProfiles || {}) },
+    favoriteHandles: Array.isArray(snapshot.favoriteHandles) ? [...new Set(snapshot.favoriteHandles.map(normalizeHandle).filter(Boolean))] : getSettingList("favoriteHandles"),
+    blockedHandles: Array.isArray(snapshot.blockedHandles) ? [...new Set(snapshot.blockedHandles.map(normalizeHandle).filter(Boolean))] : getSettingList("blockedHandles"),
+    disappearingHandles: Array.isArray(snapshot.disappearingHandles) ? [...new Set(snapshot.disappearingHandles.map(normalizeHandle).filter(Boolean))] : getSettingList("disappearingHandles"),
+    mutedGroupIds: Array.isArray(snapshot.mutedGroupIds) ? [...new Set(snapshot.mutedGroupIds.map(String).filter(Boolean))] : getSettingList("mutedGroupIds"),
+    groupAvatars: { ...(settings.groupAvatars || {}), ...(snapshot.groupAvatars || {}) },
+    threadWorkflow: { ...(settings.threadWorkflow || {}), ...(snapshot.threadWorkflow || {}) },
+    inbox: snapshot.inbox || settings.inbox || {},
+  };
+}
+
 function isVisibleMessageRow(row) {
   if (getSettingList("blockedHandles").includes(row.sender_handle)) return false;
   const grouped = unpackGroupBody(row.body);
@@ -260,6 +304,43 @@ function getOutgoingQueue() {
 
 function saveOutgoingQueue(queue) {
   localStorage.setItem("threadlineOutgoingQueue", JSON.stringify(queue));
+}
+
+async function pushSyncState(reason = "auto") {
+  const handle = normalizeHandle(settings.profile?.handle || "");
+  if (!isValidHandle(handle)) throw new Error("Save a valid handle in Profile first.");
+  const payload = { updatedAt: new Date().toISOString(), app: "threadline", reason, settings: getSyncSnapshot() };
+  await sendRemoteMessage(handle, SYNC_SUBJECT, `${SYNC_STATE_PREFIX}${JSON.stringify(payload)}`, { sender: handle });
+  localStorage.setItem("threadlineLastSyncPushedAt", payload.updatedAt);
+}
+
+function queueSyncBroadcast(reason = "auto") {
+  if (suppressSyncBroadcast || settings.syncEnabled === false) return;
+  window.clearTimeout(syncBroadcastTimer);
+  syncBroadcastTimer = window.setTimeout(() => {
+    pushSyncState(reason).catch(() => {});
+  }, 1200);
+}
+
+function applyIncomingSync(rows, handle) {
+  const syncRows = rows.filter((row) => row.sender_handle === handle && row.recipient_handle === handle && isSyncMessageRow(row));
+  if (!syncRows.length) return;
+  const latest = syncRows.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).at(-1);
+  const raw = String(latest.body).slice(SYNC_STATE_PREFIX.length);
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  const incomingStamp = payload?.updatedAt || latest.created_at;
+  const lastApplied = localStorage.getItem("threadlineLastSyncAppliedAt") || "";
+  if (lastApplied && new Date(incomingStamp) <= new Date(lastApplied)) return;
+  suppressSyncBroadcast = true;
+  mergeSyncSnapshot(payload?.settings || {});
+  saveSettings();
+  suppressSyncBroadcast = false;
+  localStorage.setItem("threadlineLastSyncAppliedAt", incomingStamp);
 }
 
 async function flushOutgoingQueue() {
@@ -360,8 +441,10 @@ async function fetchMessages() {
     const response = await fetch(`${SUPABASE_URL}/rest/v1/${MESSAGES_TABLE}?${query}`, { headers: getHeaders() });
     if (!response.ok) throw new Error();
     const rows = await response.json();
+    applyIncomingSync(rows, handle);
+    const chatRows = rows.filter((row) => !isSyncMessageRow(row));
     const groups = new Map();
-    rows.filter(isVisibleMessageRow).forEach((row) => {
+    chatRows.filter(isVisibleMessageRow).forEach((row) => {
       const grouped = unpackGroupBody(row.body);
       const decodedMessage = unpackMessageBody(grouped.body);
       const other = row.sender_handle === handle ? row.recipient_handle : row.sender_handle;
@@ -417,7 +500,7 @@ async function fetchMessages() {
     });
     await fetchGames(handle);
     await fetchTypingIndicators(handle);
-    notifyNewUnread(rows, handle);
+    notifyNewUnread(chatRows, handle);
     activeThread = activeThread ? threads.find((thread) => thread.id === activeThread.id) || null : threads[0] || null;
     if (appShortcut === "unread") {
       activeThread = threads.find((thread) => thread.unreadCount) || activeThread;
@@ -867,6 +950,7 @@ function toast(message) {
 function saveSettings() {
   localStorage.setItem("threadlineSettings", JSON.stringify(settings));
   renderSettings();
+  queueSyncBroadcast("auto");
 }
 
 function renderSettings() {
@@ -2145,6 +2229,14 @@ $("#inlineAiButton").addEventListener("click", () => {
   openSettingsDialog($("#aiDialog"));
 });
 $("#sidebarNotificationsButton").addEventListener("click", openNotificationDialog);
+$("#syncNowButton").addEventListener("click", async () => {
+  try {
+    await pushSyncState("manual");
+    toast("Sync pushed.");
+  } catch (error) {
+    toast(error.message || "Sync failed.");
+  }
+});
 $("#sidebarProfileButton").addEventListener("click", () => $("#profileButton").click());
 $("#sidebarIdentityButton").addEventListener("click", () => $("#profileButton").click());
 $("#installHelpButton").addEventListener("click", () => openSettingsDialog($("#installDialog")));
